@@ -249,7 +249,7 @@ $$ LANGUAGE plpgsql;
 --   • Manager can override any status
 -- ============================================================
 CREATE OR REPLACE FUNCTION bank_review_loan(
-    p_app_id     VARCHAR,
+    p_app_id     INTEGER,
     p_emp_id     INTEGER,
     p_new_status VARCHAR,
     p_notes      TEXT DEFAULT NULL
@@ -264,7 +264,7 @@ BEGIN
         RAISE EXCEPTION 'Application "%" not found', p_app_id;
     END IF;
 
-    SELECT role INTO v_emp_role FROM employee WHERE emp_id = p_emp_id;
+    SELECT designation INTO v_emp_role FROM employee WHERE emp_id = p_emp_id;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Employee "%" not found', p_emp_id;
     END IF;
@@ -336,7 +336,7 @@ $$ LANGUAGE plpgsql;
 -- SECTION 7: ACCOUNT MINI-STATEMENT (Customer view helper)
 -- ============================================================
 CREATE OR REPLACE FUNCTION bank_mini_statement(
-    p_account_id VARCHAR,
+    p_account_id inTEGER,
     p_limit      INT DEFAULT 10
 )
 RETURNS TABLE (
@@ -419,7 +419,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Get an employee's pending work queue
-CREATE OR REPLACE FUNCTION bank_emp_queue(p_emp_id VARCHAR)
+CREATE OR REPLACE FUNCTION bank_emp_queue(p_emp_id INTEGER)
 RETURNS TABLE (
     app_id          TEXT,
     customer        INT,
@@ -439,7 +439,6 @@ BEGIN
         cf.credit_score
     FROM loan_application la
     JOIN customer c ON c.customer_id = la.customer_id
-    LEFT JOIN customer_financials cf ON cf.customer_id = la.customer_id
     WHERE la.assigned_emp_id = p_emp_id
       AND la.status NOT IN ('Approved','Rejected','Disbursed')
     ORDER BY la.application_date;
@@ -447,41 +446,300 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ============================================================
--- SECTION 10: SAMPLE DATA — Loan Applications
+-- SECTION 9: EMPLOYEE HR UPDATE FUNCTION           ← NEW
 -- ============================================================
-SELECT bank_apply_loan(001, 30000.00, 'Home renovation');
-SELECT bank_apply_loan(004, 12000.00, 'Medical expenses');
-SELECT bank_apply_loan(003, 50000.00, 'Business expansion');
-SELECT bank_apply_loan(002, 8000.00,  'Education fees');
+-- bank_hr_update(
+--     p_emp_id          — employee being updated
+--     p_authorized_by   — manager/HR authorising the change
+--     p_update_type     — type of HR event (see CHECK constraint)
+--     p_effective_date  — when the change takes effect
+--     p_reason          — mandatory justification text
+--     p_new_designation — new designation (for promotions etc.)
+--     p_new_dept_id     — new department (for transfers)
+--     p_new_salary      — new salary (for revisions / promotions)
+--     p_new_emp_type    — new employment type (contract→permanent etc.)
+-- )
+--
+-- What it does:
+--   1. Validates the authorising employee has Branch Manager or
+--      Senior Relationship Manager role.
+--   2. Reads current values from employee table as the "old" state.
+--   3. Inserts a record into employee_hr_update (full audit trail).
+--   4. Applies the change to the employee table atomically.
+--   5. Returns a formatted confirmation with before/after summary.
+--
+-- Supported update_type values (mirrors CHECK constraint):
+--   salary_revision | promotion | demotion | department_transfer |
+--   designation_change | employment_type_change | termination | reinstatement
+-- ============================================================
+CREATE OR REPLACE FUNCTION bank_hr_update(
+    p_emp_id          INT,
+    p_authorized_by   INT,
+    p_update_type     VARCHAR,
+    p_effective_date  DATE,
+    p_reason          TEXT,
+    p_new_designation VARCHAR DEFAULT NULL,
+    p_new_dept_id     INT     DEFAULT NULL,
+    p_new_salary      NUMERIC DEFAULT NULL,
+    p_new_emp_type    VARCHAR DEFAULT NULL
+)
+RETURNS TEXT AS $$
+DECLARE
+    v_emp             employee%ROWTYPE;
+    v_auth_role       VARCHAR(80);
+    v_auth_name       TEXT;
+    v_hr_update_id    INT;
+    v_result          TEXT;
+    v_changes         TEXT := '';
+ 
+    -- Resolved "new" values (fall back to current if not supplied)
+    v_eff_designation VARCHAR(80);
+    v_eff_dept_id     INT;
+    v_eff_salary      NUMERIC(12,2);
+    v_eff_emp_type    VARCHAR(20);
+    v_eff_status      VARCHAR(20);
+BEGIN
+ 
+    -- ---- 1. Load the employee record ----
+    SELECT * INTO v_emp FROM employee WHERE emp_id = p_emp_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Employee % not found', p_emp_id;
+    END IF;
+ 
+    -- ---- 2. Validate authorising employee ----
+    SELECT designation, full_name INTO v_auth_role, v_auth_name
+    FROM employee
+    WHERE emp_id = p_authorized_by AND status = 'active';
+ 
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Authorising employee % not found or inactive', p_authorized_by;
+    END IF;
+ 
+    IF v_auth_role NOT IN ('Branch Manager', 'Senior Relationship Manager') THEN
+        RAISE EXCEPTION 'Employee % (%) is not authorised to make HR updates. '
+                        'Only Branch Manager or Senior Relationship Manager may do so.',
+                        p_authorized_by, v_auth_role;
+    END IF;
+ 
+    -- An employee cannot authorise their own HR update
+    IF p_emp_id = p_authorized_by THEN
+        RAISE EXCEPTION 'An employee cannot authorise their own HR update';
+    END IF;
+ 
+    -- ---- 3. Validate update_type ----
+    IF p_update_type NOT IN (
+        'salary_revision','promotion','demotion','department_transfer',
+        'designation_change','employment_type_change','termination','reinstatement'
+    ) THEN
+        RAISE EXCEPTION 'Invalid update_type "%". Allowed: salary_revision, promotion, demotion, '
+                        'department_transfer, designation_change, employment_type_change, '
+                        'termination, reinstatement', p_update_type;
+    END IF;
+ 
+    -- ---- 4. Validate inputs for specific update types ----
+    IF p_update_type = 'salary_revision' AND p_new_salary IS NULL THEN
+        RAISE EXCEPTION 'p_new_salary is required for salary_revision';
+    END IF;
+ 
+    IF p_update_type IN ('promotion', 'demotion', 'designation_change') AND p_new_designation IS NULL THEN
+        RAISE EXCEPTION 'p_new_designation is required for %', p_update_type;
+    END IF;
+ 
+    IF p_update_type = 'department_transfer' AND p_new_dept_id IS NULL THEN
+        RAISE EXCEPTION 'p_new_dept_id is required for department_transfer';
+    END IF;
+ 
+    IF p_update_type = 'employment_type_change' AND p_new_emp_type IS NULL THEN
+        RAISE EXCEPTION 'p_new_emp_type is required for employment_type_change';
+    END IF;
+ 
+    IF p_update_type = 'reinstatement' AND v_emp.status != 'terminated' THEN
+        RAISE EXCEPTION 'Employee % is not terminated — cannot reinstate', p_emp_id;
+    END IF;
+ 
+    IF p_update_type = 'termination' AND v_emp.status = 'terminated' THEN
+        RAISE EXCEPTION 'Employee % is already terminated', p_emp_id;
+    END IF;
+ 
+    IF p_new_dept_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM department WHERE dept_id = p_new_dept_id) THEN
+        RAISE EXCEPTION 'Department % does not exist', p_new_dept_id;
+    END IF;
+ 
+    IF p_new_salary IS NOT NULL AND p_new_salary <= 0 THEN
+        RAISE EXCEPTION 'New salary must be positive';
+    END IF;
+ 
+    IF p_new_emp_type IS NOT NULL AND p_new_emp_type NOT IN ('permanent','contract','probation') THEN
+        RAISE EXCEPTION 'Invalid employment type "%". Must be: permanent, contract, probation', p_new_emp_type;
+    END IF;
+ 
+    -- ---- 5. Resolve effective new values ----
+    v_eff_designation := COALESCE(p_new_designation, v_emp.designation);
+    v_eff_dept_id     := COALESCE(p_new_dept_id,     v_emp.dept_id);
+    v_eff_salary      := COALESCE(p_new_salary,      v_emp.salary);
+    v_eff_emp_type    := COALESCE(p_new_emp_type,    v_emp.employment_type);
+    v_eff_status      := CASE p_update_type
+                            WHEN 'termination'   THEN 'terminated'
+                            WHEN 'reinstatement' THEN 'active'
+                            ELSE v_emp.status
+                         END;
+ 
+    -- ---- 6. Write to employee_hr_update (audit log) ----
+    INSERT INTO employee_hr_update (
+        emp_id, update_type, effective_date,
+        old_designation, old_dept_id, old_salary, old_emp_type,
+        new_designation, new_dept_id, new_salary, new_emp_type,
+        reason, authorized_by
+    ) VALUES (
+        p_emp_id, p_update_type, p_effective_date,
+        v_emp.designation, v_emp.dept_id, v_emp.salary, v_emp.employment_type,
+        v_eff_designation, v_eff_dept_id, v_eff_salary, v_eff_emp_type,
+        p_reason, p_authorized_by
+    )
+    RETURNING hr_update_id INTO v_hr_update_id;
+ 
+    -- ---- 7. Apply change to employee table ----
+    UPDATE employee SET
+        designation     = v_eff_designation,
+        dept_id         = v_eff_dept_id,
+        salary          = v_eff_salary,
+        employment_type = v_eff_emp_type,
+        status          = v_eff_status
+    WHERE emp_id = p_emp_id;
+ 
+    -- ---- 8. Build change summary ----
+    IF v_emp.designation     != v_eff_designation THEN
+        v_changes := v_changes || format('   Designation : %s → %s' || chr(10), v_emp.designation, v_eff_designation);
+    END IF;
+    IF v_emp.dept_id IS DISTINCT FROM v_eff_dept_id THEN
+        v_changes := v_changes || format('   Department  : %s → %s' || chr(10), v_emp.dept_id, v_eff_dept_id);
+    END IF;
+    IF v_emp.salary          != v_eff_salary THEN
+        v_changes := v_changes || format('   Salary      : ₹%s → ₹%s' || chr(10),
+                                         v_emp.salary::NUMERIC(12,2), v_eff_salary::NUMERIC(12,2));
+    END IF;
+    IF v_emp.employment_type != v_eff_emp_type THEN
+        v_changes := v_changes || format('   Emp. Type   : %s → %s' || chr(10), v_emp.employment_type, v_eff_emp_type);
+    END IF;
+    IF v_emp.status          != v_eff_status THEN
+        v_changes := v_changes || format('   Status      : %s → %s' || chr(10), v_emp.status, v_eff_status);
+    END IF;
+ 
+    IF v_changes = '' THEN
+        v_changes := '   (no field values changed — only logged)' || chr(10);
+    END IF;
+ 
+    v_result := format(
+        '✅ HR Update #%s recorded successfully.' || chr(10) ||
+        '   Employee    : %s (ID: %s)' || chr(10) ||
+        '   Update Type : %s' || chr(10) ||
+        '   Effective   : %s' || chr(10) ||
+        '   Authorised  : %s (ID: %s)' || chr(10) ||
+        '   Changes:' || chr(10) || '%s' ||
+        '   Reason      : %s',
+        v_hr_update_id,
+        v_emp.full_name, p_emp_id,
+        p_update_type,
+        p_effective_date,
+        v_auth_name, p_authorized_by,
+        v_changes,
+        p_reason
+    );
+ 
+    RETURN v_result;
+END;
+$$ LANGUAGE plpgsql;
+ -- ============================================================
+-- SECTION 9B: HR HISTORY VIEW HELPER
+-- ============================================================
+-- bank_emp_hr_history(emp_id)
+--   Returns the full HR update trail for an employee,
+--   joining in employee and department names for readability.
+-- ============================================================
+CREATE OR REPLACE FUNCTION bank_emp_hr_history(p_emp_id INT)
+RETURNS TABLE (
+    hr_update_id     INT,
+    update_type      TEXT,
+    effective_date   DATE,
+    old_designation  TEXT,
+    new_designation  TEXT,
+    old_dept         TEXT,
+    new_dept         TEXT,
+    old_salary       NUMERIC,
+    new_salary       NUMERIC,
+    old_emp_type     TEXT,
+    new_emp_type     TEXT,
+    reason           TEXT,
+    authorized_by    TEXT,
+    recorded_at      TIMESTAMP
+) AS $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM employee WHERE emp_id = p_emp_id) THEN
+        RAISE EXCEPTION 'Employee % not found', p_emp_id;
+    END IF;
+ 
+    RETURN QUERY
+    SELECT
+        h.hr_update_id,
+        h.update_type::TEXT,
+        h.effective_date,
+        h.old_designation::TEXT,
+        h.new_designation::TEXT,
+        od.dept_name::TEXT  AS old_dept,
+        nd.dept_name::TEXT  AS new_dept,
+        h.old_salary,
+        h.new_salary,
+        h.old_emp_type::TEXT,
+        h.new_emp_type::TEXT,
+        h.reason::TEXT,
+        auth.full_name::TEXT AS authorized_by,
+        h.recorded_at
+    FROM employee_hr_update h
+    LEFT JOIN department od   ON od.dept_id   = h.old_dept_id
+    LEFT JOIN department nd   ON nd.dept_id   = h.new_dept_id
+    LEFT JOIN employee   auth ON auth.emp_id  = h.authorized_by
+    WHERE h.emp_id = p_emp_id
+    ORDER BY h.effective_date, h.hr_update_id;
+END;
+$$ LANGUAGE plpgsql;
 
 -- ============================================================
--- SECTION 11: QUICK DEMO QUERIES
+-- QUICK USAGE REFERENCE
 -- ============================================================
 DO $$ BEGIN
-  RAISE NOTICE 'Banking Layer installed. Try these:';
-  RAISE NOTICE '';
-  RAISE NOTICE '-- Deposit / Withdraw / Transfer';
-  RAISE NOTICE 'SELECT bank_deposit(''ACC001'', 5000.00, ''Salary credit'');';
-  RAISE NOTICE 'SELECT bank_withdraw(''ACC001'', 1000.00, ''ATM withdrawal'');';
-  RAISE NOTICE 'SELECT bank_transfer(''ACC001'', ''ACC002'', 2000.00, ''Rent payment'');';
-  RAISE NOTICE '';
-  RAISE NOTICE '-- Loan workflow';
-  RAISE NOTICE 'SELECT bank_apply_loan( 3, 25000.00, ''Car loan'');';
-  RAISE NOTICE 'SELECT bank_review_loan(''APP0001'', ''EMP002'', ''Under Review'', ''Checking docs'');';
-  RAISE NOTICE 'SELECT bank_review_loan(''APP0001'', ''EMP002'', ''Approved'', ''All good'');';
-  RAISE NOTICE '';
-  RAISE NOTICE '-- Role views';
-  RAISE NOTICE 'SELECT * FROM view_customer_portal   WHERE customer_id = ''CUST001'';';
-  RAISE NOTICE 'SELECT * FROM view_employee_workbench WHERE emp_id     = ''EMP002'';';
-  RAISE NOTICE 'SELECT * FROM view_manager_dashboard  WHERE branch_id  = ''BR001'';';
-  RAISE NOTICE 'SELECT * FROM view_loan_pipeline;';
-  RAISE NOTICE 'SELECT * FROM view_account_ledger WHERE account_id = ''ACC001'';';
-  RAISE NOTICE '';
-  RAISE NOTICE '-- Helpers';
-  RAISE NOTICE 'SELECT bank_customer_summary(''CUST001'');';
-  RAISE NOTICE 'SELECT * FROM bank_emp_queue(''EMP002'');';
-  RAISE NOTICE 'SELECT * FROM bank_mini_statement(''ACC001'', 5);';
+    RAISE NOTICE '';
+    RAISE NOTICE '============================================================';
+    RAISE NOTICE '  BANKING LAYER — QUICK REFERENCE';
+    RAISE NOTICE '============================================================';
+    RAISE NOTICE '';
+    RAISE NOTICE '-- Transactions';
+    RAISE NOTICE 'SELECT bank_deposit(1, 5000.00);';
+    RAISE NOTICE 'SELECT bank_withdraw(1, 2000.00);';
+    RAISE NOTICE 'SELECT bank_transfer(1, 2, 3000.00);';
+    RAISE NOTICE 'SELECT * FROM bank_mini_statement(1, 10);';
+    RAISE NOTICE '';
+    RAISE NOTICE '-- Loan workflow';
+    RAISE NOTICE 'SELECT bank_apply_loan(1, 200000.00, ''Home extension'');';
+    RAISE NOTICE 'SELECT bank_review_loan(5, 3, ''under_review'', ''Documents received'');';
+    RAISE NOTICE 'SELECT bank_review_loan(5, 1, ''approved'', ''Credit check passed'');';
+    RAISE NOTICE 'SELECT * FROM bank_emp_queue(3);';
+    RAISE NOTICE '';
+    RAISE NOTICE '-- HR Updates (authorised by Branch Manager emp_id=1)';
+    RAISE NOTICE 'SELECT bank_hr_update(6, 1, ''salary_revision'', CURRENT_DATE,';
+    RAISE NOTICE '       ''Annual increment FY25'', NULL, NULL, 45000, NULL);';
+    RAISE NOTICE 'SELECT bank_hr_update(5, 1, ''promotion'', CURRENT_DATE,';
+    RAISE NOTICE '       ''Exceeds targets'', ''Senior Relationship Manager'', NULL, 52000, NULL);';
+    RAISE NOTICE 'SELECT bank_hr_update(4, 1, ''department_transfer'', CURRENT_DATE,';
+    RAISE NOTICE '       ''Restructuring'', NULL, 2, NULL, NULL);';
+    RAISE NOTICE 'SELECT bank_hr_update(3, 1, ''employment_type_change'', CURRENT_DATE,';
+    RAISE NOTICE '       ''Probation completed'', NULL, NULL, 57000, ''permanent'');';
+    RAISE NOTICE '';
+    RAISE NOTICE '-- HR History';
+    RAISE NOTICE 'SELECT * FROM bank_emp_hr_history(6);';
+    RAISE NOTICE '';
+    RAISE NOTICE '-- Customer summary';
+    RAISE NOTICE 'SELECT bank_customer_summary(1);';
+    RAISE NOTICE '============================================================';
 END $$;
-
-SELECT 'Banking Layer created: deposits, withdrawals, transfers, loan workflow, 5 role-based views.' AS status;
-
+ 
+SELECT '✅ Banking Layer loaded: deposit, withdraw, transfer, loan workflow, HR update, HR history.' AS status;
