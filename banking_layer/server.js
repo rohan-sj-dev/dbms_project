@@ -270,16 +270,7 @@ app.post('/api/banking/apply-loan', async (req, res) => {
     if (!amount || parseFloat(amount) <= 0) return res.status(400).json({ error: 'Loan amount must be a positive number' });
     const rows = await query('SELECT bank_apply_loan($1, $2, $3) AS result',
       [customer_id, amount, purpose || 'General purpose']);
-    let message = rows[0].result;
-    // Replace assigned officer ID with employee name for readability
-    const match = message.match(/Assigned to:\s*(\d+)/i);
-    if (match) {
-      const empRows = await query('SELECT full_name FROM employee WHERE emp_id=$1', [parseInt(match[1], 10)]);
-      if (empRows.length) {
-        message = message.replace(match[0], `Assigned to: ${empRows[0].full_name}`);
-      }
-    }
-    res.json({ message });
+    res.json({ message: rows[0].result });
   } catch (e) { res.status(400).json({ error: friendlyPgError(e) }); }
 });
 
@@ -872,13 +863,20 @@ app.post('/api/employees', async (req, res) => {
 
 app.put('/api/employees/:id', async (req, res) => {
   try {
-    const { designation, salary, employment_type, dept_id, status } = req.body;
+    const { full_name, designation, salary, employment_type, dept_id, branch_id, manager_id, status } = req.body;
     const rows = await query(
-      `UPDATE employee SET designation=COALESCE($1,designation), salary=COALESCE($2,salary),
-        employment_type=COALESCE($3,employment_type), dept_id=COALESCE($4,dept_id),
-        status=COALESCE($5,status)
-       WHERE emp_id=$6 RETURNING *`,
-      [designation, salary, employment_type, dept_id, status, req.params.id]);
+      `UPDATE employee SET
+        full_name=COALESCE($1,full_name),
+        designation=COALESCE($2,designation),
+        salary=COALESCE($3,salary),
+        employment_type=COALESCE($4,employment_type),
+        dept_id=COALESCE($5,dept_id),
+        branch_id=COALESCE($6,branch_id),
+        manager_id=$7,
+        status=COALESCE($8,status)
+       WHERE emp_id=$9 RETURNING *`,
+      [full_name || null, designation, salary, employment_type,
+       intOrNull(dept_id), intOrNull(branch_id), intOrNull(manager_id) , status, req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'Employee not found' });
     res.json(rows[0]);
   } catch (e) { res.status(400).json({ error: friendlyPgError(e) }); }
