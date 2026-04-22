@@ -11,7 +11,7 @@ const columns = (onEdit) => [
   { key: 'loan_id',        label: 'ID' },
   { key: 'customer_name',  label: 'Customer' },
   { key: 'loan_type',      label: 'Type', render: (r) => <Badge variant="purple">{r.loan_type}</Badge> },
-  { key: 'applied_amount', label: 'Applied', render: (r) => `₹${Number(r.applied_amount).toLocaleString('en-IN')}` },
+  { key: 'applied_amount', label: 'Applied', render: (r) => `₹${Number(r.applied_amount || 0).toLocaleString('en-IN')}` },
   { key: 'sanctioned_amount', label: 'Sanctioned', render: (r) => r.sanctioned_amount ? `₹${Number(r.sanctioned_amount).toLocaleString('en-IN')}` : '—' },
   { key: 'interest_rate',  label: 'Rate %', render: (r) => r.interest_rate ?? r.base_interest_rate },
   { key: 'application_status', label: 'App Status', render: (r) => <Badge variant={appColor[r.application_status]}>{r.application_status}</Badge> },

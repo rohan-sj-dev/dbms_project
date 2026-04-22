@@ -10,8 +10,8 @@ const columns = [
   { key: 'txn_type',         label: 'Type', render: (r) =>
     <Badge variant={r.txn_type === 'credit' ? 'green' : 'red'}>{r.txn_type}</Badge> },
   { key: 'channel',          label: 'Channel', render: (r) => <Badge variant="blue">{r.channel}</Badge> },
-  { key: 'amount',           label: 'Amount', render: (r) => `₹${Number(r.amount).toLocaleString('en-IN')}` },
-  { key: 'balance_after',    label: 'Balance After', render: (r) => `₹${Number(r.balance_after).toLocaleString('en-IN')}` },
+  { key: 'amount',           label: 'Amount', render: (r) => `₹${Number(r.amount || 0).toLocaleString('en-IN')}` },
+  { key: 'balance_after',    label: 'Balance After', render: (r) => r.balance_after == null ? '—' : `₹${Number(r.balance_after).toLocaleString('en-IN')}` },
   { key: 'reference_number', label: 'Reference' },
   { key: 'txn_date',         label: 'Date', render: (r) => new Date(r.txn_date).toLocaleString() },
   { key: 'description',      label: 'Description' },

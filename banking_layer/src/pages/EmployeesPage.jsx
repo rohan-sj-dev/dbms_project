@@ -13,7 +13,7 @@ const columns = (onEdit) => [
   { key: 'dept_name',      label: 'Department' },
   { key: 'branch_name',    label: 'Branch' },
   { key: 'employment_type', label: 'Type', render: (r) => <Badge variant="blue">{r.employment_type}</Badge> },
-  { key: 'salary',         label: 'Salary', render: (r) => `₹${Number(r.salary).toLocaleString('en-IN')}` },
+  { key: 'salary',         label: 'Salary', render: (r) => `₹${Number(r.salary || 0).toLocaleString('en-IN')}` },
   { key: 'join_date',      label: 'Joined', render: (r) => r.join_date?.slice(0, 10) },
   { key: 'status', label: 'Status', render: (r) => <Badge variant={statusColor[r.status]}>{r.status}</Badge> },
   { key: 'manager_name',   label: 'Manager' },

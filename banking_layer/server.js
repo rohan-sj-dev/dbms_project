@@ -28,6 +28,17 @@ function intOrNull(v) {
   return Number.isNaN(n) ? null : n;
 }
 
+/** Map Postgres errors to human-friendly messages. */
+function friendlyPgError(e) {
+  const msg = e?.message || 'Operation failed';
+  if (e?.code === '23505') return `Duplicate value — ${e.detail || msg}`;
+  if (e?.code === '23503') return `Referenced record not found — ${e.detail || msg}`;
+  if (e?.code === '23502') return `Missing required field — ${e.column || msg}`;
+  if (e?.code === '23514') return `Value violates a check constraint — ${e.detail || msg}`;
+  if (e?.code === '22P02') return `Invalid input format — ${msg}`;
+  return msg;
+}
+
 // ════════════════════════════════════════════════════════════
 //  BANKING ENDPOINTS
 // ════════════════════════════════════════════════════════════
@@ -91,39 +102,57 @@ app.get('/api/customers', async (_req, res) => {
       LEFT JOIN branch b ON c.branch_id = b.branch_id
       LEFT JOIN employee e ON c.assigned_rm_id = e.emp_id
       ORDER BY c.customer_id`);
-    res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json(rows || []);
+  } catch (e) { res.status(500).json({ error: friendlyPgError(e) }); }
 });
 
 app.get('/api/accounts', async (_req, res) => {
   try {
     const rows = await query(`
-      SELECT a.*, c.full_name AS customer_name, b.branch_name
+      SELECT a.*, c.full_name AS customer_name, b.branch_name,
+             COALESCE(a.current_balance, 0) AS current_balance,
+             COALESCE(a.interest_rate, 0) AS interest_rate,
+             COALESCE(a.min_balance, 0) AS min_balance
       FROM account a
       LEFT JOIN customer c ON a.customer_id = c.customer_id
       LEFT JOIN branch b ON a.branch_id = b.branch_id
       ORDER BY a.account_id`);
-    res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json(rows || []);
+  } catch (e) { res.status(500).json({ error: friendlyPgError(e) }); }
 });
 
 app.get('/api/transactions', async (_req, res) => {
   try {
-    const rows = await query('SELECT * FROM view_account_ledger ORDER BY txn_date DESC');
-    res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    const rows = await query(`
+      SELECT t.txn_id, t.txn_date, t.account_id, a.account_number, a.account_type,
+             c.customer_id, c.full_name AS customer_name, t.txn_type,
+             CASE WHEN t.txn_type = 'credit' THEN 'CR' ELSE 'DR' END AS dr_cr,
+             t.channel, t.amount, COALESCE(t.balance_after, 0) AS balance_after,
+             t.reference_number, COALESCE(t.description, '—') AS description
+      FROM transaction t
+      JOIN account a ON a.account_id = t.account_id
+      JOIN customer c ON c.customer_id = a.customer_id
+      ORDER BY t.txn_date DESC`);
+    res.json(rows || []);
+  } catch (e) { res.status(500).json({ error: friendlyPgError(e) }); }
 });
 
 app.get('/api/loans', async (_req, res) => {
   try {
     const rows = await query(`
-      SELECT l.*, c.full_name AS customer_name, e.full_name AS officer_name
+      SELECT l.*, c.full_name AS customer_name, e.full_name AS officer_name,
+             COALESCE(l.sanctioned_amount, 0) AS sanctioned_amount,
+             COALESCE(l.disbursed_amount, 0) AS disbursed_amount,
+             COALESCE(l.interest_rate, 0) AS interest_rate,
+             COALESCE(l.emi_amount, 0) AS emi_amount,
+             COALESCE(l.outstanding_principal, 0) AS outstanding_principal,
+             COALESCE(l.base_interest_rate, 0) AS base_interest_rate
       FROM loan l
       LEFT JOIN customer c ON l.customer_id = c.customer_id
       LEFT JOIN employee e ON l.assigned_officer = e.emp_id
       ORDER BY l.loan_id`);
-    res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json(rows || []);
+  } catch (e) { res.status(500).json({ error: friendlyPgError(e) }); }
 });
 
 app.get('/api/transfers', async (_req, res) => {
@@ -131,13 +160,14 @@ app.get('/api/transfers', async (_req, res) => {
     const rows = await query(`
       SELECT f.*,
              fa.account_number AS from_account_number,
-             ta.account_number AS to_account_number_internal
+             ta.account_number AS to_account_number_internal,
+             COALESCE(f.amount, 0) AS amount
       FROM fund_transfer f
       LEFT JOIN account fa ON f.from_account_id = fa.account_id
       LEFT JOIN account ta ON f.to_account_id = ta.account_id
       ORDER BY f.initiated_at DESC`);
-    res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json(rows || []);
+  } catch (e) { res.status(500).json({ error: friendlyPgError(e) }); }
 });
 
 app.get('/api/hr-updates', async (_req, res) => {
@@ -205,44 +235,86 @@ app.get('/api/account-ledger', async (req, res) => {
 app.post('/api/banking/deposit', async (req, res) => {
   try {
     const { account_id, amount } = req.body;
+    if (!account_id) return res.status(400).json({ error: 'Account is required' });
+    if (!amount || parseFloat(amount) <= 0) return res.status(400).json({ error: 'Amount must be a positive number' });
     const rows = await query('SELECT bank_deposit($1, $2) AS result', [account_id, amount]);
     res.json({ message: rows[0].result });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(400).json({ error: friendlyPgError(e) }); }
 });
 
 app.post('/api/banking/withdraw', async (req, res) => {
   try {
     const { account_id, amount } = req.body;
+    if (!account_id) return res.status(400).json({ error: 'Account is required' });
+    if (!amount || parseFloat(amount) <= 0) return res.status(400).json({ error: 'Amount must be a positive number' });
     const rows = await query('SELECT bank_withdraw($1, $2) AS result', [account_id, amount]);
     res.json({ message: rows[0].result });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(400).json({ error: friendlyPgError(e) }); }
 });
 
 app.post('/api/banking/transfer', async (req, res) => {
   try {
     const { from_account_id, to_account_id, amount } = req.body;
+    if (!from_account_id || !to_account_id) return res.status(400).json({ error: 'Both source and destination accounts are required' });
+    if (!amount || parseFloat(amount) <= 0) return res.status(400).json({ error: 'Amount must be a positive number' });
     const rows = await query('SELECT bank_transfer($1, $2, $3) AS result',
       [from_account_id, to_account_id, amount]);
     res.json({ message: rows[0].result });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(400).json({ error: friendlyPgError(e) }); }
 });
 
 app.post('/api/banking/apply-loan', async (req, res) => {
   try {
     const { customer_id, amount, purpose } = req.body;
+    if (!customer_id) return res.status(400).json({ error: 'Customer is required' });
+    if (!amount || parseFloat(amount) <= 0) return res.status(400).json({ error: 'Loan amount must be a positive number' });
     const rows = await query('SELECT bank_apply_loan($1, $2, $3) AS result',
       [customer_id, amount, purpose || 'General purpose']);
-    res.json({ message: rows[0].result });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    let message = rows[0].result;
+    // Replace assigned officer ID with employee name for readability
+    const match = message.match(/Assigned to:\s*(\d+)/i);
+    if (match) {
+      const empRows = await query('SELECT full_name FROM employee WHERE emp_id=$1', [parseInt(match[1], 10)]);
+      if (empRows.length) {
+        message = message.replace(match[0], `Assigned to: ${empRows[0].full_name}`);
+      }
+    }
+    res.json({ message });
+  } catch (e) { res.status(400).json({ error: friendlyPgError(e) }); }
 });
 
 app.post('/api/banking/review-loan', async (req, res) => {
   try {
-    const { application_id, emp_id, status, notes } = req.body;
+    const { application_id, emp_id, notes } = req.body;
+    let { status } = req.body;
+    if (!application_id) return res.status(400).json({ error: 'Application ID is required' });
+    if (!emp_id) return res.status(400).json({ error: 'Employee ID is required' });
+    if (!status) return res.status(400).json({ error: 'Status is required' });
+
+    const empRows = await query('SELECT designation FROM employee WHERE emp_id=$1', [emp_id]);
+    if (!empRows.length) return res.status(404).json({ error: 'Employee not found' });
+
+    const designation = empRows[0].designation || '';
+    const isManager = designation.toLowerCase().includes('manager');
+
+    // Frontend may send 'reviewed_by_employee' — map to DB-allowed 'under_review'
+    const normalized = status.toLowerCase() === 'reviewed_by_employee' ? 'under_review' : status.toLowerCase();
+
+    if (!isManager && !['rejected', 'under_review'].includes(normalized)) {
+      return res.status(403).json({ error: 'Employees can only reject the application or mark it as reviewed. Only managers can approve loans.' });
+    }
+
     const rows = await query('SELECT bank_review_loan($1, $2, $3, $4) AS result',
-      [application_id, emp_id, status, notes || null]);
-    res.json({ message: rows[0].result });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+      [application_id, emp_id, normalized, notes || null]);
+
+    let message = rows[0].result;
+    if (!isManager && normalized === 'under_review') {
+      message = `Application ${application_id} marked as 'Reviewed by Employee' — awaiting manager approval.`;
+    }
+    res.json({ message });
+  } catch (e) {
+    res.status(400).json({ error: friendlyPgError(e) });
+  }
 });
 
 app.get('/api/banking/mini-statement/:accountId', async (req, res) => {
@@ -266,13 +338,69 @@ app.get('/api/banking/customer-summary/:customerId', async (req, res) => {
 app.get('/api/loan-applications', async (_req, res) => {
   try {
     const rows = await query(`
-      SELECT la.*, c.full_name AS customer_name, e.full_name AS officer_name
+      SELECT la.*, c.full_name AS customer_name, e.full_name AS officer_name,
+             COALESCE(la.requested_amount, 0) AS requested_amount
       FROM loan_application la
       LEFT JOIN customer c ON la.customer_id = c.customer_id
       LEFT JOIN employee e ON la.assigned_emp_id = e.emp_id
       ORDER BY la.application_date DESC`);
-    res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json(rows || []);
+  } catch (e) { res.status(500).json({ error: friendlyPgError(e) }); }
+});
+
+app.post('/api/loan-applications', async (req, res) => {
+  try {
+    const { customer_id, requested_amount, purpose } = req.body;
+    if (!customer_id) return res.status(400).json({ error: 'Customer is required' });
+    if (!requested_amount || parseFloat(requested_amount) <= 0) 
+      return res.status(400).json({ error: 'Loan amount must be a positive number' });
+    
+    const rows = await query(`
+      INSERT INTO loan_application (customer_id, requested_amount, purpose, status)
+      VALUES ($1, $2, $3, 'submitted')
+      RETURNING application_id`,
+      [customer_id, parseFloat(requested_amount), purpose || null]);
+    
+    const appId = rows[0].application_id;
+    const result = await query(`
+      SELECT la.*, c.full_name AS customer_name, e.full_name AS officer_name
+      FROM loan_application la
+      LEFT JOIN customer c ON la.customer_id = c.customer_id
+      LEFT JOIN employee e ON la.assigned_emp_id = e.emp_id
+      WHERE la.application_id = $1`, [appId]);
+    res.json(result[0]);
+  } catch (e) {
+    res.status(400).json({ error: friendlyPgError(e) });
+  }
+});
+
+app.put('/api/loan-applications/:id', async (req, res) => {
+  try {
+    const { decision_notes, assigned_emp_id } = req.body;
+    let { status } = req.body;
+    if (!status) return res.status(400).json({ error: 'Status is required' });
+    // Frontend concept 'reviewed_by_employee' maps to DB-allowed 'under_review'
+    if (status === 'reviewed_by_employee') status = 'under_review';
+    const validStatuses = ['submitted', 'under_review', 'rejected', 'approved'];
+    if (!validStatuses.includes(status))
+      return res.status(400).json({ error: `Status must be one of: ${validStatuses.join(', ')}` });
+
+    await query(`
+      UPDATE loan_application
+      SET status=$1, decision_notes=$2, reviewed_at=CASE WHEN $3 IS NOT NULL THEN NOW() ELSE reviewed_at END, assigned_emp_id=COALESCE($4, assigned_emp_id)
+      WHERE application_id=$5`,
+      [status, decision_notes || null, decision_notes ? true : false, assigned_emp_id || null, req.params.id]);
+
+    const result = await query(`
+      SELECT la.*, c.full_name AS customer_name, e.full_name AS officer_name
+      FROM loan_application la
+      LEFT JOIN customer c ON la.customer_id = c.customer_id
+      LEFT JOIN employee e ON la.assigned_emp_id = e.emp_id
+      WHERE la.application_id=$1`, [req.params.id]);
+
+    if (!result.length) return res.status(404).json({ error: 'Loan application not found' });
+    res.json(result[0]);
+  } catch (e) { res.status(400).json({ error: friendlyPgError(e) }); }
 });
 
 // ════════════════════════════════════════════════════════════
@@ -562,28 +690,33 @@ app.post('/api/customers', async (req, res) => {
     const rmId = intOrNull(req.body.assigned_rm_id);
     if (!bid) return res.status(400).json({ error: 'Branch is required' });
     if (!full_name) return res.status(400).json({ error: 'Full name is required' });
+    if (!dob) return res.status(400).json({ error: 'Date of birth is required' });
+    if (!phone) return res.status(400).json({ error: 'Phone is required' });
     const rows = await query(
       `INSERT INTO customer (branch_id, assigned_rm_id, full_name, dob, gender, phone, email,
         occupation, income_bracket, aadhaar_number, pan_number, kyc_status)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-      [bid, rmId, full_name, dob, gender, phone, email,
-       occupation, income_bracket, aadhaar_number || null, pan_number || null, kyc_status || 'pending']);
+      [bid, rmId, full_name, dob, gender, phone, email || null,
+       occupation || null, income_bracket || null, aadhaar_number || null, pan_number || null, kyc_status || 'pending']);
     res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(400).json({ error: friendlyPgError(e) }); }
 });
 
 app.put('/api/customers/:id', async (req, res) => {
   try {
-    const { full_name, phone, email, occupation, income_bracket, kyc_status, status, assigned_rm_id } = req.body;
+    const { full_name, phone, email, occupation, income_bracket, kyc_status, status } = req.body;
+    const rmId = intOrNull(req.body.assigned_rm_id);
     const rows = await query(
       `UPDATE customer SET full_name=COALESCE($1,full_name), phone=COALESCE($2,phone),
         email=COALESCE($3,email), occupation=COALESCE($4,occupation),
         income_bracket=COALESCE($5,income_bracket), kyc_status=COALESCE($6,kyc_status),
         status=COALESCE($7,status), assigned_rm_id=COALESCE($8,assigned_rm_id)
        WHERE customer_id=$9 RETURNING *`,
-      [full_name, phone, email, occupation, income_bracket, kyc_status, status, assigned_rm_id, req.params.id]);
+      [full_name || null, phone || null, email || null, occupation || null,
+       income_bracket || null, kyc_status || null, status || null, rmId, req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Customer not found' });
     res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(400).json({ error: friendlyPgError(e) }); }
 });
 
 // ── Accounts CRUD ──
@@ -603,7 +736,7 @@ app.post('/api/accounts', async (req, res) => {
       [custId, bid, openedBy, account_number, account_type,
        min_balance || 0, interest_rate || 0]);
     res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(400).json({ error: friendlyPgError(e) }); }
 });
 
 app.put('/api/accounts/:id', async (req, res) => {
@@ -614,8 +747,9 @@ app.put('/api/accounts/:id', async (req, res) => {
         status=COALESCE($2,status), min_balance=COALESCE($3,min_balance)
        WHERE account_id=$4 RETURNING *`,
       [interest_rate, status, min_balance, req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Account not found' });
     res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(400).json({ error: friendlyPgError(e) }); }
 });
 
 // ── Transactions CRUD ──
@@ -638,7 +772,7 @@ app.post('/api/transactions', async (req, res) => {
       [acctId, txn_type, channel, amt, newBal, ref, description, initiatedBy]);
     await query('UPDATE account SET current_balance=$1 WHERE account_id=$2', [newBal, acctId]);
     res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(400).json({ error: friendlyPgError(e) }); }
 });
 
 // ── Loans CRUD ──
@@ -659,7 +793,7 @@ app.post('/api/loans', async (req, res) => {
        processing_fee_pct || 0.5, applied_amount, purpose, collateral_type || 'none',
        collateral_desc || null, collateral_value || null]);
     res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(400).json({ error: friendlyPgError(e) }); }
 });
 
 app.put('/api/loans/:id', async (req, res) => {
@@ -684,8 +818,9 @@ app.put('/api/loans/:id', async (req, res) => {
       [application_status, sanctioned_amount, disbursed_amount, interest_rate,
        tenure_months, emi_amount, disbursement_date, maturity_date,
        outstanding_principal, status, rejection_reason, req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Loan not found' });
     res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(400).json({ error: friendlyPgError(e) }); }
 });
 
 // ── Fund Transfers CRUD ──
@@ -702,7 +837,7 @@ app.post('/api/transfers', async (req, res) => {
       [fromId, toId, to_ifsc || null,
        to_account_number || null, transfer_mode, amount, remarks || null]);
     res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(400).json({ error: friendlyPgError(e) }); }
 });
 
 app.put('/api/transfers/:id', async (req, res) => {
@@ -711,8 +846,9 @@ app.put('/api/transfers/:id', async (req, res) => {
     const rows = await query(
       `UPDATE fund_transfer SET status=$1, settled_at=CASE WHEN $1='completed' THEN NOW() ELSE settled_at END
        WHERE transfer_id=$2 RETURNING *`, [status, req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Transfer not found' });
     res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(400).json({ error: friendlyPgError(e) }); }
 });
 
 // ── Employees CRUD ──
@@ -731,7 +867,7 @@ app.post('/api/employees', async (req, res) => {
       [bid, deptId, mgrId, full_name, designation,
        employment_type || 'permanent', join_date, salary]);
     res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(400).json({ error: friendlyPgError(e) }); }
 });
 
 app.put('/api/employees/:id', async (req, res) => {
@@ -743,8 +879,9 @@ app.put('/api/employees/:id', async (req, res) => {
         status=COALESCE($5,status)
        WHERE emp_id=$6 RETURNING *`,
       [designation, salary, employment_type, dept_id, status, req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Employee not found' });
     res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(400).json({ error: friendlyPgError(e) }); }
 });
 
 // ── HR Updates — uses bank_hr_update() function with validation ──

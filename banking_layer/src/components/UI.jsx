@@ -35,9 +35,9 @@ export function StatCard({ label, value, icon: Icon, color = 'indigo' }) {
         <div className={`p-3 rounded-lg ${colors[color]}`}>
           <Icon size={22} />
         </div>
-        <div>
+        <div className="min-w-0">
           <p className="text-sm text-gray-500">{label}</p>
-          <p className="text-2xl font-bold text-gray-900">{value ?? '—'}</p>
+          <p className="text-2xl font-bold text-gray-900 truncate">{value ?? '—'}</p>
         </div>
       </div>
     </Card>
