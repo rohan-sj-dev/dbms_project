@@ -10,7 +10,7 @@ const columns = [
   { key: 'account_number', label: 'Account #' },
   { key: 'customer_name', label: 'Customer' },
   { key: 'account_type', label: 'Type', render: r => <Badge variant="blue">{r.account_type}</Badge> },
-  { key: 'current_balance', label: 'Balance', render: r => `₹${Number(r.current_balance).toLocaleString('en-IN')}` },
+  { key: 'current_balance', label: 'Balance', render: r => `₹${Number(r.current_balance || 0).toLocaleString('en-IN')}` },
   { key: 'interest_rate', label: 'Rate %' },
   { key: 'opened_date', label: 'Opened', render: r => r.opened_date?.slice(0, 10) },
   { key: 'status', label: 'Status', render: r => <Badge variant={statusColor[r.status]}>{r.status}</Badge> },

@@ -73,7 +73,7 @@ export default function CustomerDashboard() {
             <DataTable columns={[
               { key: 'account_number', label: 'Account #' },
               { key: 'account_type', label: 'Type', render: r => <Badge variant="blue">{r.account_type}</Badge> },
-              { key: 'current_balance', label: 'Balance', render: r => `₹${Number(r.current_balance).toLocaleString('en-IN')}` },
+              { key: 'current_balance', label: 'Balance', render: r => `₹${Number(r.current_balance || 0).toLocaleString('en-IN')}` },
               { key: 'status', label: 'Status', render: r => <Badge variant={r.status === 'active' ? 'green' : 'amber'}>{r.status}</Badge> },
             ]} rows={accounts.data} />}
         </Card>
@@ -85,7 +85,7 @@ export default function CustomerDashboard() {
             <DataTable columns={[
               { key: 'txn_date', label: 'Date', render: r => r.txn_date?.slice(0, 10) },
               { key: 'txn_type', label: 'Type', render: r => <Badge variant={r.txn_type === 'credit' ? 'green' : 'red'}>{r.txn_type}</Badge> },
-              { key: 'amount', label: 'Amount', render: r => `₹${Number(r.amount).toLocaleString('en-IN')}` },
+              { key: 'amount', label: 'Amount', render: r => `₹${Number(r.amount || 0).toLocaleString('en-IN')}` },
               { key: 'description', label: 'Description' },
             ]} rows={(txns.data || []).slice(0, 10)} />}
         </Card>
@@ -96,13 +96,13 @@ export default function CustomerDashboard() {
           <h3 className="font-semibold text-gray-900 mb-4">Your Loans</h3>
           <DataTable columns={[
             { key: 'loan_type', label: 'Type', render: r => <Badge variant="purple">{r.loan_type}</Badge> },
-            { key: 'applied_amount', label: 'Applied', render: r => `₹${Number(r.applied_amount).toLocaleString('en-IN')}` },
+            { key: 'applied_amount', label: 'Applied', render: r => `₹${Number(r.applied_amount || 0).toLocaleString('en-IN')}` },
             { key: 'interest_rate', label: 'Rate %', render: r => r.interest_rate || r.base_interest_rate },
             { key: 'application_status', label: 'Status', render: r => {
               const c = { submitted: 'amber', under_review: 'blue', approved: 'green', rejected: 'red', disbursed: 'green', withdrawn: 'red' };
               return <Badge variant={c[r.application_status] || 'default'}>{r.application_status}</Badge>;
             }},
-            { key: 'emi_amount', label: 'EMI', render: r => r.emi_amount ? `₹${Number(r.emi_amount).toLocaleString('en-IN')}` : '—' },
+            { key: 'emi_amount', label: 'EMI', render: r => r.emi_amount ? `₹${Number(r.emi_amount || 0).toLocaleString('en-IN')}` : '—' },
           ]} rows={loans.data} />
         </Card>
       )}
@@ -112,11 +112,12 @@ export default function CustomerDashboard() {
           <h3 className="font-semibold text-gray-900 mb-4">Loan Applications</h3>
           <DataTable columns={[
             { key: 'application_id', label: 'ID' },
-            { key: 'requested_amount', label: 'Amount', render: r => `₹${Number(r.requested_amount).toLocaleString('en-IN')}` },
+            { key: 'requested_amount', label: 'Amount', render: r => `₹${Number(r.requested_amount || 0).toLocaleString('en-IN')}` },
             { key: 'purpose', label: 'Purpose' },
             { key: 'status', label: 'Status', render: r => {
               const c = { submitted: 'amber', under_review: 'blue', approved: 'green', rejected: 'red' };
-              return <Badge variant={c[r.status] || 'default'}>{r.status}</Badge>;
+              const label = { submitted: 'Submitted', under_review: 'Reviewed by Employee', approved: 'Approved', rejected: 'Rejected' };
+              return <Badge variant={c[r.status] || 'default'}>{label[r.status] || r.status}</Badge>;
             }},
             { key: 'officer_name', label: 'Officer' },
             { key: 'application_date', label: 'Applied', render: r => r.application_date?.slice(0, 10) },

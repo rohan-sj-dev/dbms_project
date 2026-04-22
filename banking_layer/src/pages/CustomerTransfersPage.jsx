@@ -11,7 +11,7 @@ const columns = [
   { key: 'to_account_number', label: 'To Acct', render: r => r.to_account_number_internal || r.to_account_number || '—' },
   { key: 'to_ifsc', label: 'To IFSC' },
   { key: 'transfer_mode', label: 'Mode', render: r => <Badge variant="blue">{r.transfer_mode?.toUpperCase()}</Badge> },
-  { key: 'amount', label: 'Amount', render: r => `₹${Number(r.amount).toLocaleString('en-IN')}` },
+  { key: 'amount', label: 'Amount', render: r => `₹${Number(r.amount || 0).toLocaleString('en-IN')}` },
   { key: 'status', label: 'Status', render: r => <Badge variant={statusColor[r.status]}>{r.status}</Badge> },
   { key: 'initiated_at', label: 'Date', render: r => r.initiated_at?.slice(0, 10) },
   { key: 'remarks', label: 'Remarks' },

@@ -8,9 +8,9 @@ const statusColor = { active: 'green', frozen: 'amber', dormant: 'amber', closed
 const columns = [
   { key: 'account_number', label: 'Account #' },
   { key: 'account_type', label: 'Type', render: r => <Badge variant="blue">{r.account_type}</Badge> },
-  { key: 'current_balance', label: 'Balance', render: r => `₹${Number(r.current_balance).toLocaleString('en-IN')}` },
+  { key: 'current_balance', label: 'Balance', render: r => `₹${Number(r.current_balance || 0).toLocaleString('en-IN')}` },
   { key: 'interest_rate', label: 'Interest %' },
-  { key: 'min_balance', label: 'Min Balance', render: r => `₹${Number(r.min_balance).toLocaleString('en-IN')}` },
+  { key: 'min_balance', label: 'Min Balance', render: r => `₹${Number(r.min_balance || 0).toLocaleString('en-IN')}` },
   { key: 'opened_date', label: 'Opened', render: r => r.opened_date?.slice(0, 10) },
   { key: 'status', label: 'Status', render: r => <Badge variant={statusColor[r.status]}>{r.status}</Badge> },
 ];

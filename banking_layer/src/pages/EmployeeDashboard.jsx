@@ -51,7 +51,7 @@ export default function EmployeeDashboard() {
               { key: 'loan_id', label: 'ID' },
               { key: 'customer_name', label: 'Customer' },
               { key: 'loan_type', label: 'Type', render: r => <Badge variant="purple">{r.loan_type}</Badge> },
-              { key: 'applied_amount', label: 'Amount', render: r => `₹${Number(r.applied_amount).toLocaleString('en-IN')}` },
+              { key: 'applied_amount', label: 'Amount', render: r => `₹${Number(r.applied_amount || 0).toLocaleString('en-IN')}` },
               { key: 'application_status', label: 'Status', render: r => <Badge variant={r.application_status === 'disbursed' ? 'green' : 'amber'}>{r.application_status}</Badge> },
             ]} rows={loans.data} />}
         </Card>
@@ -63,7 +63,7 @@ export default function EmployeeDashboard() {
           <DataTable columns={[
             { key: 'app_id', label: 'App ID' },
             { key: 'customer_name', label: 'Customer' },
-            { key: 'amount', label: 'Amount', render: r => `₹${Number(r.amount).toLocaleString('en-IN')}` },
+            { key: 'amount', label: 'Amount', render: r => `₹${Number(r.amount || 0).toLocaleString('en-IN')}` },
             { key: 'app_status', label: 'Status', render: r => <Badge variant={r.app_status === 'submitted' ? 'amber' : 'blue'}>{r.app_status}</Badge> },
             { key: 'days_waiting', label: 'Days Waiting', render: r => <span className={r.days_waiting > 7 ? 'text-red-600 font-semibold' : ''}>{r.days_waiting}d</span> },
           ]} rows={queue.data} />

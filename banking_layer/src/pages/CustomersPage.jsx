@@ -25,10 +25,17 @@ export default function CustomersPage() {
   const { data, loading, error, refetch } = useApi(getCustomers);
   const branches = useApi(getBranches);
   const employees = useApi(getEmployees);
-  const [modal, setModal] = useState(null); // null | 'add' | row
+  const [modal, setModal] = useState(null);
   const [form, setForm] = useState(empty);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState(null);
+  const [search, setSearch] = useState('');
+
+  const filtered = useMemo(() => {
+    if (!data || !search.trim()) return data || [];
+    const q = search.toLowerCase();
+    return data.filter(r => [r.full_name, r.phone, r.email, r.occupation, r.pan_number, r.aadhaar_number, r.status, r.kyc_status].some(v => v && String(v).toLowerCase().includes(q)));
+  }, [data, search]);
 
   const openAdd = () => { setForm(empty); setFormError(null); setModal('add'); };
   const openEdit = (r) => { setForm({ ...r }); setFormError(null); setModal(r); };

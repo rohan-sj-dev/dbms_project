@@ -12,7 +12,7 @@ const columns = (onEdit) => [
   { key: 'to_account_number_internal', label: 'To (Internal)', render: (r) => r.to_account_number_internal || r.to_account_number || '—' },
   { key: 'to_ifsc',               label: 'To IFSC' },
   { key: 'transfer_mode',         label: 'Mode', render: (r) => <Badge variant="blue">{r.transfer_mode}</Badge> },
-  { key: 'amount',                label: 'Amount', render: (r) => `₹${Number(r.amount).toLocaleString('en-IN')}` },
+  { key: 'amount',                label: 'Amount', render: (r) => `₹${Number(r.amount || 0).toLocaleString('en-IN')}` },
   { key: 'status',                label: 'Status', render: (r) => <Badge variant={statusColor[r.status]}>{r.status}</Badge> },
   { key: 'initiated_at',          label: 'Initiated', render: (r) => new Date(r.initiated_at).toLocaleString() },
   { key: '_edit', label: '', render: (r) => r.status === 'pending' ? <Btn variant="secondary" onClick={() => onEdit(r)}>Update</Btn> : null },

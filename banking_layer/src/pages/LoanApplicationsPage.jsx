@@ -5,13 +5,14 @@ import { getLoanPipeline, bankReviewLoan } from '../api';
 import { PageHeader, Card, DataTable, Badge, Spinner, ErrorBox, Modal, FormField, Input, Select, Btn } from '../components/UI';
 
 const statusColor = { submitted: 'amber', under_review: 'blue', approved: 'green', rejected: 'red' };
+const statusDisplay = { submitted: 'Submitted', under_review: 'Reviewed by Employee', approved: 'Approved', rejected: 'Rejected' };
 
 const columns = [
   { key: 'application_id',   label: 'ID' },
   { key: 'customer_name',    label: 'Customer' },
-  { key: 'requested_amount', label: 'Amount', render: r => `₹${Number(r.requested_amount).toLocaleString('en-IN')}` },
+  { key: 'requested_amount', label: 'Amount', render: r => `₹${Number(r.requested_amount || 0).toLocaleString('en-IN')}` },
   { key: 'purpose',          label: 'Purpose' },
-  { key: 'status_label',     label: 'Status', render: r => <Badge variant={statusColor[r.status] || 'default'}>{r.status_label || r.status}</Badge> },
+  { key: 'status_label',     label: 'Status', render: r => <Badge variant={statusColor[r.status] || 'default'}>{statusDisplay[r.status] || r.status_label || r.status}</Badge> },
   { key: 'officer_name',     label: 'Officer' },
   { key: 'days_open',        label: 'Days Open', render: r => <span className={r.days_open > 7 ? 'text-red-600 font-semibold' : ''}>{r.days_open}d</span> },
   { key: 'application_date', label: 'Applied', render: r => r.application_date?.slice(0, 10) },
@@ -105,12 +106,15 @@ export default function LoanApplicationsPage() {
                     <option value="under_review">Under Review</option>
                   </>
                 ) : (
-                  <option value="under_review">Mark as Under Review</option>
+                  <>
+                    <option value="under_review">Mark as Reviewed by Employee</option>
+                    <option value="rejected">Reject</option>
+                  </>
                 )}
               </Select>
             </FormField>
             {!isManager && (
-              <p className="text-xs text-amber-600">As an employee, you can only mark applications as &ldquo;Under Review&rdquo;. A manager must approve or reject.</p>
+              <p className="text-xs text-amber-600">As an employee, you can reject the application or mark it as reviewed. Only a manager can approve a loan.</p>
             )}
             <FormField label="Notes">
               <Input value={reviewForm.notes} onChange={e => setReviewForm(f => ({ ...f, notes: e.target.value }))} placeholder="Decision notes..." />

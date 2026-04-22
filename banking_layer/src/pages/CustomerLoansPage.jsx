@@ -9,7 +9,7 @@ const loanStatusColor = { pending: 'amber', active: 'green', closed: 'default', 
 const columns = [
   { key: 'loan_id', label: 'Loan ID' },
   { key: 'loan_type', label: 'Type', render: r => <Badge variant="purple">{r.loan_type}</Badge> },
-  { key: 'applied_amount', label: 'Applied', render: r => `₹${Number(r.applied_amount).toLocaleString('en-IN')}` },
+  { key: 'applied_amount', label: 'Applied', render: r => `₹${Number(r.applied_amount || 0).toLocaleString('en-IN')}` },
   { key: 'sanctioned_amount', label: 'Sanctioned', render: r => r.sanctioned_amount ? `₹${Number(r.sanctioned_amount).toLocaleString('en-IN')}` : '—' },
   { key: 'interest_rate', label: 'Rate %', render: r => r.interest_rate || r.base_interest_rate },
   { key: 'tenure_months', label: 'Tenure (mo)' },
