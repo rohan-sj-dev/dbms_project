@@ -1,20 +1,12 @@
--- ============================================================
--- GIT-LIKE DATABASE VERSIONING - ROLLBACK & TIME TRAVEL
--- ============================================================
+﻿-- GIT-LIKE DATABASE VERSIONING - ROLLBACK & TIME TRAVEL
 -- vcs_rollback()         - Revert table data to a prior commit
 -- vcs_snapshot()         - Capture current state as a commit
 -- vcs_reconstruct_at()   - Reconstruct row state at a commit
 -- vcs_time_travel()      - View table as it was at a commit
--- ============================================================
 
--- ============================================================
 -- VCS_ROLLBACK: Revert a table to its state at a given commit
 -- Equivalent to: git revert / git reset --hard
---
--- CAUTION: This modifies actual table data by replaying
--- inverse operations. A new "rollback commit" is created
--- to record what was undone.
--- ============================================================
+
 CREATE OR REPLACE FUNCTION vcs_rollback(
     p_to_commit_id INT,
     p_table_name VARCHAR DEFAULT NULL,
@@ -33,7 +25,7 @@ BEGIN
     v_head := vcs_get_head_commit(v_branch);
     
     IF p_to_commit_id >= v_head THEN
-        RETURN '⚠️  Target commit is at or ahead of HEAD. Nothing to rollback.';
+        RETURN 'Target commit is at or ahead of HEAD. Nothing to rollback.';
     END IF;
     
     FOR v_change IN (
@@ -50,7 +42,7 @@ BEGIN
             FROM vcs_repository WHERE table_name = v_change.table_name;
             
             IF v_change.operation = 'INSERT' THEN
-                -- ✅ Cast row_pk to match the PK column type
+                -- Cast row_pk to match the PK column type
                 EXECUTE format(
                     'DELETE FROM %I WHERE %I::TEXT = $1',
                     v_change.table_name, v_pk_col
@@ -63,7 +55,7 @@ BEGIN
                 ) USING v_change.old_data;
                 
             ELSIF v_change.operation = 'UPDATE' THEN
-                -- ✅ Cast row_pk to match the PK column type
+                -- Cast row_pk to match the PK column type
                 EXECUTE format(
                     'UPDATE %I SET (%s) = (SELECT %s FROM jsonb_populate_record(NULL::%I, $1)) WHERE %I::TEXT = $2',
                     v_change.table_name,
@@ -79,7 +71,7 @@ BEGIN
     END LOOP;
     
     IF p_dry_run THEN
-        v_result := format('🔍 DRY RUN: Would rollback %s change(s) to commit #%s', v_rollback_count, p_to_commit_id);
+        v_result := format('DRY RUN: Would rollback %s change(s) to commit #%s', v_rollback_count, p_to_commit_id);
     ELSE
         IF v_rollback_count > 0 THEN
             PERFORM vcs_commit(
@@ -87,17 +79,15 @@ BEGIN
                 CURRENT_USER::VARCHAR
             );
         END IF;
-        v_result := format('✅ Rolled back %s change(s) to commit #%s on branch "%s"', v_rollback_count, p_to_commit_id, v_branch);
+        v_result := format('Rolled back %s change(s) to commit #%s on branch "%s"', v_rollback_count, p_to_commit_id, v_branch);
     END IF;
     
     RETURN v_result;
 END;
 $$ LANGUAGE plpgsql;
--- ============================================================
 -- VCS_RECONSTRUCT_AT: Reconstruct what a row looked like at 
 -- a specific commit by replaying changes forward from genesis.
 -- Equivalent to: git show <commit>:<file>
--- ============================================================
 CREATE OR REPLACE FUNCTION vcs_reconstruct_at(
     p_table_name VARCHAR,
     p_row_pk TEXT,
@@ -131,11 +121,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
 -- VCS_TIME_TRAVEL: View all rows of a table as they were at 
 -- a specific commit. Returns JSONB rows.
 -- Equivalent to: checking out a file at a historical commit
--- ============================================================
 CREATE OR REPLACE FUNCTION vcs_time_travel(
     p_table_name VARCHAR,
     p_at_commit_id INT
@@ -158,12 +146,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
 -- VCS_SNAPSHOT: Capture the entire current state of a tracked
 -- table as an "initial snapshot" commit. Useful to establish
 -- the baseline after setting up tracking.
 -- Equivalent to: git add . && git commit -m "Initial snapshot"
--- ============================================================
 CREATE OR REPLACE FUNCTION vcs_snapshot(
     p_table_name VARCHAR,
     p_message TEXT DEFAULT NULL
@@ -202,9 +188,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
 -- VCS_SNAPSHOT_ALL: Snapshot ALL tracked tables at once
--- ============================================================
 CREATE OR REPLACE FUNCTION vcs_snapshot_all(
     p_message TEXT DEFAULT 'Full database snapshot'
 )
@@ -231,7 +215,7 @@ BEGIN
     END LOOP;
     
     IF v_total = 0 THEN
-        RETURN '⚠️  No tracked tables have data to snapshot.';
+        RETURN 'WARNING: No tracked tables have data to snapshot.';
     END IF;
     
     RETURN vcs_commit(
@@ -241,4 +225,4 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-SELECT '✅ Rollback & Time Travel functions created: vcs_rollback(), vcs_time_travel(), vcs_snapshot()' AS status;
+SELECT 'Rollback & Time Travel functions created: vcs_rollback(), vcs_time_travel(), vcs_snapshot()' AS status;

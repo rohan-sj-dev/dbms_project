@@ -1,15 +1,13 @@
--- ============================================================
+﻿
 -- GIT-LIKE DATABASE VERSIONING - CORE FUNCTIONS
--- ============================================================
+
 -- vcs_init()         - Register a table for tracking
 -- vcs_get_active_branch() - Get current branch
 -- vcs_commit()       - Commit staged changes
--- vcs_status()       - Show uncommitted changes
--- ============================================================
+-- vcs_status()       - Show uncommitted change
 
--- ============================================================
 -- HELPER: Get the currently active branch name
--- ============================================================
+
 CREATE OR REPLACE FUNCTION vcs_get_active_branch()
 RETURNS VARCHAR(100) AS $$
 DECLARE
@@ -20,9 +18,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
+
 -- HELPER: Get latest commit ID on a branch
--- ============================================================
+
 CREATE OR REPLACE FUNCTION vcs_get_head_commit(p_branch VARCHAR DEFAULT NULL)
 RETURNS INT AS $$
 DECLARE
@@ -41,13 +39,13 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
+
 -- VCS_INIT: Register a table for version tracking
 -- Equivalent to: git init (per table)
 -- 
 -- Creates a trigger on the table to auto-capture changes
 -- into the staging area.
--- ============================================================
+
 CREATE OR REPLACE FUNCTION vcs_init(
     p_table_name VARCHAR,
     p_pk_column VARCHAR DEFAULT NULL
@@ -113,14 +111,14 @@ BEGIN
         v_trigger_name, p_table_name
     );
 
-    RETURN format('✅ Now tracking table "%s" (PK: %s). Changes will be auto-staged.', p_table_name, v_pk_col);
+    RETURN format('Now tracking table "%s" (PK: %s). Changes will be auto-staged.', p_table_name, v_pk_col);
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
+
 -- TRIGGER FUNCTION: Auto-capture row changes to staging area
 -- This fires on every INSERT/UPDATE/DELETE on tracked tables
--- ============================================================
+
 CREATE OR REPLACE FUNCTION vcs_trigger_fn()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -185,10 +183,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
+
 -- VCS_STATUS: Show uncommitted (staged) changes
 -- Equivalent to: git status
--- ============================================================
 CREATE OR REPLACE FUNCTION vcs_status(
     p_branch VARCHAR DEFAULT NULL
 )
@@ -219,13 +216,13 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
+
 -- VCS_COMMIT: Commit all staged changes on the active branch
 -- Equivalent to: git commit -m "message"
 --
 -- Moves changes from staging to permanent commit history.
 -- Generates a commit hash from the change content.
--- ============================================================
+
 CREATE OR REPLACE FUNCTION vcs_commit(
     p_message TEXT,
     p_author VARCHAR DEFAULT NULL
@@ -248,7 +245,7 @@ BEGIN
     FROM vcs_staged_change WHERE branch_name = v_branch;
     
     IF v_change_count = 0 THEN
-        RETURN '⚠️  Nothing to commit on branch "' || v_branch || '". Working tree clean.';
+        RETURN 'WARNING: Nothing to commit on branch "' || v_branch || '". Working tree clean.';
     END IF;
     
     -- Get parent commit (current HEAD)
@@ -280,18 +277,18 @@ BEGIN
     DELETE FROM vcs_staged_change WHERE branch_name = v_branch;
     
     RETURN format(
-        '✅ [%s %s] %s' || chr(10) || '   %s change(s) committed on branch "%s" by %s',
+        '[%s %s] %s' || chr(10) || '   %s change(s) committed on branch "%s" by %s',
         v_branch, LEFT(v_hash, 8), p_message, v_change_count, v_branch, v_author
     );
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
+
 -- VCS_DISCARD: Discard staged (uncommitted) changes
 -- Equivalent to: git checkout -- . (discard working changes)
--- NOTE: This only removes from staging, it does NOT undo 
+-- This only removes from staging, it does NOT undo 
 -- the actual table data changes.
--- ============================================================
+
 CREATE OR REPLACE FUNCTION vcs_discard(
     p_table_name VARCHAR DEFAULT NULL
 )
@@ -315,4 +312,4 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-SELECT '✅ Core VCS functions created: vcs_init(), vcs_commit(), vcs_status(), vcs_discard()' AS status;
+SELECT 'Core VCS functions created: vcs_init(), vcs_commit(), vcs_status(), vcs_discard()' AS status;

@@ -4,7 +4,6 @@ import { useApi } from '../hooks';
 import { getCustomerAccounts, getCustomerTransactions, getCustomerLoans, getCustomerStats,
          getCustomerLoanApps, bankApplyLoan, bankDeposit, bankWithdraw } from '../api';
 import { PageHeader, Card, StatCard, DataTable, Badge, Spinner, ErrorBox, Modal, FormField, Input, Select, Btn } from '../components/UI';
-import { CreditCard, TrendingUp, Landmark, IndianRupee, FileText } from 'lucide-react';
 
 export default function CustomerDashboard() {
   const { auth } = useAuth();
@@ -58,11 +57,11 @@ export default function CustomerDashboard() {
       {msg && <div className="mb-4 p-3 bg-blue-50 text-blue-800 rounded-lg text-sm flex justify-between"><span>{msg}</span><button onClick={() => setMsg(null)} className="text-blue-600 hover:underline cursor-pointer">×</button></div>}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-        <StatCard label="Total Balance" value={`₹${Number(s.total_balance || 0).toLocaleString('en-IN')}`} icon={IndianRupee} color="indigo" />
-        <StatCard label="Accounts" value={s.total_accounts} icon={CreditCard} color="green" />
-        <StatCard label="Active Loans" value={s.active_loans} icon={Landmark} color="amber" />
-        <StatCard label="Pending Apps" value={s.pending_applications} icon={FileText} color="red" />
-        <StatCard label="Transactions" value={s.total_transactions} icon={TrendingUp} color="sky" />
+        <StatCard label="Total Balance" value={`₹${Number(s.total_balance || 0).toLocaleString('en-IN')}`} />
+        <StatCard label="Accounts" value={s.total_accounts} />
+        <StatCard label="Active Loans" value={s.active_loans} />
+        <StatCard label="Pending Apps" value={s.pending_applications} />
+        <StatCard label="Transactions" value={s.total_transactions} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -107,23 +106,27 @@ export default function CustomerDashboard() {
         </Card>
       )}
 
-      {loanApps.data?.length > 0 && (
-        <Card className="p-6 mt-6">
-          <h3 className="font-semibold text-gray-900 mb-4">Loan Applications</h3>
-          <DataTable columns={[
-            { key: 'application_id', label: 'ID' },
-            { key: 'requested_amount', label: 'Amount', render: r => `₹${Number(r.requested_amount || 0).toLocaleString('en-IN')}` },
-            { key: 'purpose', label: 'Purpose' },
-            { key: 'status', label: 'Status', render: r => {
-              const c = { submitted: 'amber', under_review: 'blue', approved: 'green', rejected: 'red' };
-              const label = { submitted: 'Submitted', under_review: 'Reviewed by Employee', approved: 'Approved', rejected: 'Rejected' };
-              return <Badge variant={c[r.status] || 'default'}>{label[r.status] || r.status}</Badge>;
-            }},
-            { key: 'officer_name', label: 'Officer' },
-            { key: 'application_date', label: 'Applied', render: r => r.application_date?.slice(0, 10) },
-          ]} rows={loanApps.data} />
-        </Card>
-      )}
+      <Card className="p-6 mt-6">
+        <h3 className="font-semibold text-gray-900 mb-4">Loan Applications</h3>
+        {loanApps.loading ? <Spinner /> :
+         loanApps.error ? <ErrorBox message={loanApps.error} /> :
+          <DataTable
+            emptyMsg="No loan applications yet. Use 'Apply for Loan' above."
+            columns={[
+              { key: 'application_id', label: 'ID' },
+              { key: 'requested_amount', label: 'Amount', render: r => `₹${Number(r.requested_amount || 0).toLocaleString('en-IN')}` },
+              { key: 'purpose', label: 'Purpose' },
+              { key: 'status', label: 'Status', render: r => {
+                const c = { submitted: 'amber', under_review: 'blue', approved: 'green', rejected: 'red' };
+                const lbl = { submitted: 'Submitted', under_review: 'Reviewed by Employee', approved: 'Approved', rejected: 'Rejected' };
+                return <Badge variant={c[r.status] || 'default'}>{lbl[r.status] || r.status}</Badge>;
+              }},
+              { key: 'officer_name', label: 'Officer' },
+              { key: 'application_date', label: 'Applied', render: r => r.application_date?.slice(0, 10) },
+            ]}
+            rows={loanApps.data || []}
+          />}
+      </Card>
 
       {/* Apply Loan Modal */}
       <Modal open={loanModal} onClose={() => setLoanModal(false)} title="Apply for Loan">

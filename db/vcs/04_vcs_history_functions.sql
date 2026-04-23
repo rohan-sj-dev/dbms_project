@@ -1,18 +1,18 @@
--- ============================================================
+﻿
 -- GIT-LIKE DATABASE VERSIONING - HISTORY, DIFF, LOG & TAG
--- ============================================================
+
 -- vcs_log()            - View commit history
 -- vcs_diff()           - Compare two commits
 -- vcs_show()           - Show details of a single commit
 -- vcs_tag_create()     - Tag a commit
 -- vcs_tag_list()       - List all tags
 -- vcs_blame()          - Show who last modified each row
--- ============================================================
 
--- ============================================================
+
+
 -- VCS_LOG: View commit history for a branch
 -- Equivalent to: git log
--- ============================================================
+
 CREATE OR REPLACE FUNCTION vcs_log(
     p_branch VARCHAR DEFAULT NULL,
     p_limit INT DEFAULT 20
@@ -55,10 +55,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
+
 -- VCS_LOG_ALL: View commit history across ALL branches
 -- Equivalent to: git log --all --graph
--- ============================================================
+
 CREATE OR REPLACE FUNCTION vcs_log_all(
     p_limit INT DEFAULT 50
 )
@@ -89,10 +89,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
+
 -- VCS_SHOW: Show full details of a specific commit
 -- Equivalent to: git show <commit>
--- ============================================================
+
 CREATE OR REPLACE FUNCTION vcs_show(
     p_commit_id INT
 )
@@ -134,10 +134,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
+
 -- VCS_DIFF: Compare changes between two commits
 -- Equivalent to: git diff <commitA> <commitB>
--- ============================================================
+
 CREATE OR REPLACE FUNCTION vcs_diff(
     p_commit_a INT,
     p_commit_b INT
@@ -177,10 +177,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
+
 -- VCS_DIFF_BRANCH: Compare all changes between two branches
 -- Equivalent to: git diff branch1..branch2
--- ============================================================
+
 CREATE OR REPLACE FUNCTION vcs_diff_branch(
     p_branch_a VARCHAR,
     p_branch_b VARCHAR DEFAULT NULL
@@ -243,10 +243,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
+
 -- VCS_TAG_CREATE: Tag a specific commit
 -- Equivalent to: git tag -a v1.0 -m "Release 1.0"
--- ============================================================
+
 CREATE OR REPLACE FUNCTION vcs_tag_create(
     p_tag_name VARCHAR,
     p_commit_id INT DEFAULT NULL,
@@ -269,14 +269,14 @@ BEGIN
     INSERT INTO vcs_tag (tag_name, commit_id, message) 
     VALUES (p_tag_name, v_commit_id, p_message);
     
-    RETURN format('✅ Tag "%s" created at commit #%s', p_tag_name, v_commit_id);
+    RETURN format('Tag "%s" created at commit #%s', p_tag_name, v_commit_id);
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
+
 -- VCS_TAG_LIST: List all tags
 -- Equivalent to: git tag -l
--- ============================================================
+
 CREATE OR REPLACE FUNCTION vcs_tag_list()
 RETURNS TABLE (
     tag TEXT,
@@ -303,10 +303,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
+
 -- VCS_BLAME: Show who last modified each row in a table
 -- Equivalent to: git blame <file>
--- ============================================================
+
 CREATE OR REPLACE FUNCTION vcs_blame(
     p_table_name VARCHAR,
     p_branch VARCHAR DEFAULT NULL
@@ -340,10 +340,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
+
 -- VCS_HISTORY: Show the full change history for a specific row
 -- Equivalent to: git log -p -- <file> (for a row)
--- ============================================================
+
 CREATE OR REPLACE FUNCTION vcs_row_history(
     p_table_name VARCHAR,
     p_row_pk TEXT
@@ -376,4 +376,4 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-SELECT '✅ History functions created: vcs_log(), vcs_diff(), vcs_show(), vcs_tag_create(), vcs_blame(), vcs_row_history()' AS status;
+SELECT 'History functions created: vcs_log(), vcs_diff(), vcs_show(), vcs_tag_create(), vcs_blame(), vcs_row_history()' AS status;

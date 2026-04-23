@@ -1,16 +1,11 @@
--- ============================================================
--- GIT-LIKE DATABASE VERSIONING - BRANCH & MERGE FUNCTIONS
--- ============================================================
+﻿-- GIT-LIKE DATABASE VERSIONING - BRANCH & MERGE FUNCTIONS
 -- vcs_branch_create()  - Create a new branch
 -- vcs_branch_list()    - List all branches
 -- vcs_checkout()       - Switch active branch
 -- vcs_merge()          - Merge source branch into target
--- ============================================================
 
--- ============================================================
 -- VCS_BRANCH_CREATE: Create a new branch from current branch
 -- Equivalent to: git branch <name>  OR  git checkout -b <name>
--- ============================================================
 CREATE OR REPLACE FUNCTION vcs_branch_create(
     p_branch_name VARCHAR,
     p_from_branch VARCHAR DEFAULT NULL,
@@ -52,7 +47,7 @@ BEGIN
         CURRENT_USER
     );
     
-    v_result := format('✅ Branch "%s" created from "%s" at commit #%s', 
+    v_result := format('Branch "%s" created from "%s" at commit #%s', 
                         p_branch_name, v_from_branch, v_fork_commit);
     
     -- Optionally checkout the new branch
@@ -66,10 +61,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
 -- VCS_BRANCH_LIST: List all branches with metadata
 -- Equivalent to: git branch -a -v
--- ============================================================
 CREATE OR REPLACE FUNCTION vcs_branch_list()
 RETURNS TABLE (
     branch TEXT,
@@ -104,7 +97,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
 -- VCS_CHECKOUT: Switch to a different branch
 -- Equivalent to: git checkout <branch>
 --
@@ -112,7 +104,6 @@ $$ LANGUAGE plpgsql;
 -- Data changes you make after checkout will be staged under 
 -- the new branch. It does NOT rewrite table data (see 
 -- vcs_rollback for that).
--- ============================================================
 CREATE OR REPLACE FUNCTION vcs_checkout(
     p_branch_name VARCHAR
 )
@@ -146,20 +137,18 @@ BEGIN
     SET value = p_branch_name, updated_at = NOW() 
     WHERE key = 'active_branch';
     
-    RETURN format('✅ Switched to branch "%s"' || chr(10) || 
+    RETURN format('Switched to branch "%s"' || chr(10) || 
                   '   HEAD is at commit #%s', 
                   p_branch_name, vcs_get_head_commit(p_branch_name));
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
 -- VCS_MERGE: Merge one branch into another
 -- Equivalent to: git merge <source> (into current branch)
 --
 -- Strategy: Replay all commits from source that happened AFTER
 -- the fork point into the target branch. Creates a merge commit.
 -- Detects conflicts (same row PK changed on both branches).
--- ============================================================
 CREATE OR REPLACE FUNCTION vcs_merge(
     p_source_branch VARCHAR,
     p_target_branch VARCHAR DEFAULT NULL,
@@ -198,22 +187,35 @@ BEGIN
     v_source_head := vcs_get_head_commit(p_source_branch);
     v_target_head := vcs_get_head_commit(v_target);
     
-    -- Detect conflicts: same table+pk modified on both branches after fork
-    SELECT COUNT(DISTINCT s.table_name || '::' || s.row_pk) INTO v_conflict_count
-    FROM vcs_change s
-    JOIN vcs_commit sc ON s.commit_id = sc.commit_id AND sc.branch_name = p_source_branch
-    WHERE EXISTS (
-        SELECT 1 FROM vcs_change t
-        JOIN vcs_commit tc ON t.commit_id = tc.commit_id AND tc.branch_name = v_target
-        WHERE t.table_name = s.table_name AND t.row_pk = s.row_pk
-        AND tc.commit_id > COALESCE(v_fork_commit_id, 0)
-    )
-    AND sc.commit_id > COALESCE(v_fork_commit_id, 0);
-    
+    -- Detect UNRESOLVED conflicts: same row touched on both branches after fork
+    -- AND the latest committed values on each branch still differ.
+    -- Rows where both branches now agree (e.g. after a resolution commit) are
+    -- not counted — overlap in history is fine once the values converge.
+    SELECT COUNT(*) INTO v_conflict_count
+    FROM (
+        SELECT DISTINCT ON (ch.table_name, ch.row_pk)
+            ch.table_name, ch.row_pk, ch.new_data AS source_data
+        FROM vcs_change ch
+        JOIN vcs_commit co ON ch.commit_id = co.commit_id
+        WHERE co.branch_name = p_source_branch
+          AND co.commit_id > COALESCE(v_fork_commit_id, 0)
+        ORDER BY ch.table_name, ch.row_pk, co.committed_at DESC, co.commit_id DESC, ch.changed_at DESC
+    ) src
+    JOIN (
+        SELECT DISTINCT ON (ch.table_name, ch.row_pk)
+            ch.table_name, ch.row_pk, ch.new_data AS target_data
+        FROM vcs_change ch
+        JOIN vcs_commit co ON ch.commit_id = co.commit_id
+        WHERE co.branch_name = v_target
+          AND co.commit_id > COALESCE(v_fork_commit_id, 0)
+        ORDER BY ch.table_name, ch.row_pk, co.committed_at DESC, co.commit_id DESC, ch.changed_at DESC
+    ) tgt ON src.table_name = tgt.table_name AND src.row_pk = tgt.row_pk
+    WHERE src.source_data IS DISTINCT FROM tgt.target_data;
+
     IF v_conflict_count > 0 THEN
-        RETURN format('❌ MERGE CONFLICT: %s row(s) were modified on both branches.' || chr(10) ||
+        RETURN format('ERROR: MERGE CONFLICT: %s row(s) have diverging values on both branches.' || chr(10) ||
                        '   Resolve conflicts manually before merging.' || chr(10) ||
-                       '   Use: SELECT * FROM vcs_merge_conflicts(''%s'', ''%s'') to see details.',
+                       '   Use: SELECT * FROM vcs_merge_conflicts(''%s'', ''%s'') WHERE source_data IS DISTINCT FROM target_data to see details.',
                        v_conflict_count, p_source_branch, v_target);
     END IF;
     
@@ -250,7 +252,7 @@ BEGIN
     AND co.commit_id > COALESCE(v_fork_commit_id, 0);
     
     RETURN format(
-        '✅ Merge successful: "%s" → "%s"' || chr(10) ||
+        'Merge successful: "%s" → "%s"' || chr(10) ||
         '   Merge commit: #%s (%s)' || chr(10) ||
         '   %s change(s) incorporated',
         p_source_branch, v_target, v_merge_commit_id, LEFT(v_hash, 8), v_change_count
@@ -258,10 +260,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
 -- VCS_MERGE_CONFLICTS: Show conflicting rows between branches
 -- Equivalent to: viewing conflict markers in git
--- ============================================================
 CREATE OR REPLACE FUNCTION vcs_merge_conflicts(
     p_source_branch VARCHAR,
     p_target_branch VARCHAR DEFAULT NULL
@@ -283,28 +283,44 @@ BEGIN
     SELECT created_from_commit_id INTO v_fork_commit_id
     FROM vcs_branch WHERE branch_name = p_source_branch;
     
+    -- Use CTEs to independently find the LATEST change per row on each branch.
+    -- The original JOIN approach allowed PostgreSQL to pick any matching target
+    -- row, causing stale data (e.g. old 8.75 instead of resolved 8.25) to appear
+    -- in target_data even after a resolution commit was made.
     RETURN QUERY
-    SELECT DISTINCT ON (s_ch.table_name, s_ch.row_pk)
-        s_ch.table_name::TEXT,
-        s_ch.row_pk::TEXT,
-        s_ch.operation::TEXT,
-        t_ch.operation::TEXT,
-        s_ch.new_data,
-        t_ch.new_data
-    FROM vcs_change s_ch
-    JOIN vcs_commit s_co ON s_ch.commit_id = s_co.commit_id AND s_co.branch_name = p_source_branch
-    JOIN vcs_change t_ch ON s_ch.table_name = t_ch.table_name AND s_ch.row_pk = t_ch.row_pk
-    JOIN vcs_commit t_co ON t_ch.commit_id = t_co.commit_id AND t_co.branch_name = v_target
-    WHERE s_co.commit_id > COALESCE(v_fork_commit_id, 0)
-    AND t_co.commit_id > COALESCE(v_fork_commit_id, 0)
-    ORDER BY s_ch.table_name, s_ch.row_pk, s_ch.changed_at DESC;
+    WITH source_latest AS (
+        SELECT DISTINCT ON (ch.table_name, ch.row_pk)
+            ch.table_name, ch.row_pk, ch.operation, ch.new_data
+        FROM vcs_change ch
+        JOIN vcs_commit co ON ch.commit_id = co.commit_id
+        WHERE co.branch_name = p_source_branch
+          AND co.commit_id > COALESCE(v_fork_commit_id, 0)
+        ORDER BY ch.table_name, ch.row_pk, co.committed_at DESC, co.commit_id DESC, ch.changed_at DESC
+    ),
+    target_latest AS (
+        SELECT DISTINCT ON (ch.table_name, ch.row_pk)
+            ch.table_name, ch.row_pk, ch.operation, ch.new_data
+        FROM vcs_change ch
+        JOIN vcs_commit co ON ch.commit_id = co.commit_id
+        WHERE co.branch_name = v_target
+          AND co.commit_id > COALESCE(v_fork_commit_id, 0)
+        ORDER BY ch.table_name, ch.row_pk, co.committed_at DESC, co.commit_id DESC, ch.changed_at DESC
+    )
+    SELECT
+        s.table_name::TEXT,
+        s.row_pk::TEXT,
+        s.operation::TEXT,
+        t.operation::TEXT,
+        s.new_data,
+        t.new_data
+    FROM source_latest s
+    JOIN target_latest t ON s.table_name = t.table_name AND s.row_pk = t.row_pk
+    ORDER BY s.table_name, s.row_pk;
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================
 -- VCS_BRANCH_DELETE: Soft-delete a branch (mark inactive)
 -- Equivalent to: git branch -d <name>
--- ============================================================
 CREATE OR REPLACE FUNCTION vcs_branch_delete(
     p_branch_name VARCHAR
 )
@@ -331,8 +347,8 @@ BEGIN
     -- Clean up staged changes for deleted branch
     DELETE FROM vcs_staged_change WHERE branch_name = p_branch_name;
     
-    RETURN format('✅ Deleted branch "%s"', p_branch_name);
+    RETURN format('Deleted branch "%s"', p_branch_name);
 END;
 $$ LANGUAGE plpgsql;
 
-SELECT '✅ Branch & Merge functions created: vcs_branch_create(), vcs_branch_list(), vcs_checkout(), vcs_merge()' AS status;
+SELECT 'Branch & Merge functions created: vcs_branch_create(), vcs_branch_list(), vcs_checkout(), vcs_merge()' AS status;

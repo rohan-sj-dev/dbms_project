@@ -1,7 +1,6 @@
 import { useApi } from '../hooks';
 import { getBranchSummary, getVcsStats } from '../api';
 import { PageHeader, Card, StatCard, Spinner, ErrorBox } from '../components/UI';
-import { Users, CreditCard, Landmark, Briefcase, GitCommitHorizontal, GitBranch, Tag, Database } from 'lucide-react';
 
 export default function Dashboard() {
   const summary = useApi(getBranchSummary);
@@ -19,18 +18,18 @@ export default function Dashboard() {
 
       <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Banking</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <StatCard label="Customers"      value={s.total_customers}  icon={Users}      color="indigo" />
-        <StatCard label="Accounts"       value={s.total_accounts}   icon={CreditCard} color="green" />
-        <StatCard label="Active Loans"   value={s.active_loans}     icon={Landmark}    color="amber" />
-        <StatCard label="Staff"          value={s.total_staff}      icon={Briefcase}   color="sky" />
+        <StatCard label="Customers"     value={s.total_customers} />
+        <StatCard label="Accounts"      value={s.total_accounts} />
+        <StatCard label="Active Loans"  value={s.active_loans} />
+        <StatCard label="Staff"         value={s.total_staff} />
       </div>
 
       <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Version Control</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <StatCard label="Commits"         value={v.total_commits}   icon={GitCommitHorizontal} color="violet" />
-        <StatCard label="Branches"        value={v.active_branches} icon={GitBranch}           color="indigo" />
-        <StatCard label="Tags"            value={v.total_tags}      icon={Tag}                 color="green" />
-        <StatCard label="Tracked Tables"  value={v.tracked_tables}  icon={Database}            color="amber" />
+        <StatCard label="Commits"        value={v.total_commits} />
+        <StatCard label="Branches"       value={v.active_branches} />
+        <StatCard label="Tags"           value={v.total_tags} />
+        <StatCard label="Tracked Tables" value={v.tracked_tables} />
       </div>
 
       <Card className="p-6">

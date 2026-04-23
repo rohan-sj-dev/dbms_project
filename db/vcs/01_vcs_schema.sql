@@ -1,4 +1,4 @@
--- ============================================================
+﻿-- ============================================================
 -- GIT-LIKE DATABASE VERSIONING SYSTEM - SCHEMA
 -- ============================================================
 -- This creates the version control system (VCS) tables that
@@ -144,5 +144,5 @@ CREATE INDEX idx_vcs_commit_parent ON vcs_commit_parent(commit_id);
 INSERT INTO vcs_commit (branch_name, commit_hash, message, author)
 VALUES ('main', md5('genesis-' || NOW()::TEXT), 'Initial commit - system initialized', CURRENT_USER);
 
-SELECT '✅ VCS Schema created successfully. System initialized with main branch.' AS status;
+SELECT 'VCS Schema created successfully. System initialized with main branch.' AS status;
 select* from vcs_config;

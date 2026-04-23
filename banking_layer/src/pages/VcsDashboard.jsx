@@ -1,7 +1,7 @@
 import { useApi } from '../hooks';
 import { getVcsStats, getVcsLog, getActiveBranch, getRepositories } from '../api';
 import { PageHeader, Card, StatCard, DataTable, Spinner, ErrorBox, Badge } from '../components/UI';
-import { GitCommitHorizontal, GitBranch, Tag, Database, FileText, Clock } from 'lucide-react';
+import { GitBranch } from 'lucide-react';
 
 export default function VcsDashboard() {
   const stats  = useApi(getVcsStats);
@@ -26,12 +26,12 @@ export default function VcsDashboard() {
       </PageHeader>
 
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
-        <StatCard label="Commits"         value={v.total_commits}   icon={GitCommitHorizontal} color="violet" />
-        <StatCard label="Changes"         value={v.total_changes}   icon={FileText}            color="indigo" />
-        <StatCard label="Branches"        value={v.active_branches} icon={GitBranch}           color="green" />
-        <StatCard label="Tags"            value={v.total_tags}      icon={Tag}                 color="amber" />
-        <StatCard label="Tracked Tables"  value={v.tracked_tables}  icon={Database}            color="sky" />
-        <StatCard label="Staged"          value={v.staged_changes}  icon={Clock}               color="rose" />
+        <StatCard label="Commits"        value={v.total_commits} />
+        <StatCard label="Changes"        value={v.total_changes} />
+        <StatCard label="Branches"       value={v.active_branches} />
+        <StatCard label="Tags"           value={v.total_tags} />
+        <StatCard label="Tracked Tables" value={v.tracked_tables} />
+        <StatCard label="Staged"         value={v.staged_changes} />
       </div>
 
       <div className="grid lg:grid-cols-2 gap-6">
