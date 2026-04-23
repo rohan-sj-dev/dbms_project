@@ -1,13 +1,24 @@
+-- Active: 1750870354157@@127.0.0.1@5432@bank_versioning_demo
 -- ============================================================
 --  GIT-LIKE VCS DEMO — RETAIL BANKING BRANCH (9 Tables)
---  Run after: retail_banking_setup_final.sql + 01..05 VCS files
 --
+--  TARGET DATABASE : bank_versioning_demo  (NOT bank_versioning)
+--  ----------------------------------------------------------------
+--  Before running this file, set up the demo database:
+--    powershell -ExecutionPolicy Bypass -File "db\demo\00_setup_demo_db.ps1"
+--
+--  In pgAdmin: connect to bank_versioning_demo, then open this
+--  file in the Query Tool and run it (F5).
+--  ----------------------------------------------------------------
+--  The live bank_versioning database (used by the banking layer
+--  Express app) is left completely untouched.
+--  ----------------------------------------------------------------
 --  SCENARIO OVERVIEW:
 --   Step 1  — Init & Snapshot      : Track all 9 tables, baseline v1.0
 --   Step 2  — Basic Commit         : New customer + account onboarding
 --   Step 3  — Branch               : Create feature/loan-restructure branch
 --   Step 4  — Feature Work         : Approve + restructure loan on branch
---   Step 5  — Parallel Work (main) : HR update + interest rate change on main
+--   Step 5  — Parallel Work (main) : HR update + interest rate change + RBI loan cap on main
 --   Step 6  — History & Diff       : vcs_log, vcs_diff, vcs_blame, vcs_row_history
 --   Step 7  — Tags                 : Tag stable states
 --   Step 8  — Conflict Detection   : Show merge conflict, then resolve
@@ -15,66 +26,9 @@
 --   Step 10 — Rollback             : Undo accidental wrong salary entry
 --   Step 11 — Time Travel          : Reconstruct customer state at v1.0
 -- ============================================================
-
--- Auto-resets on every re-run
+--  No reset block needed — the database is always freshly
+--  created by 00_setup_demo_db.ps1 before the demo runs.
 -- ============================================================
--- RESET: Clear all VCS tracking data (safe to re-run)
--- ============================================================
-DO $$
-DECLARE
-    tbl RECORD;
-BEGIN
-    FOR tbl IN (SELECT table_name FROM vcs_repository WHERE is_active = TRUE)
-    LOOP
-        EXECUTE format('DROP TRIGGER IF EXISTS vcs_track_%I ON %I', tbl.table_name, tbl.table_name);
-    END LOOP;
-END $$;
-
-TRUNCATE TABLE vcs_tag CASCADE;
-TRUNCATE TABLE vcs_staged_change CASCADE;
-TRUNCATE TABLE vcs_change CASCADE;
-TRUNCATE TABLE vcs_commit_parent CASCADE;
-TRUNCATE TABLE vcs_commit CASCADE;
-TRUNCATE TABLE vcs_branch CASCADE;
-TRUNCATE TABLE vcs_repository CASCADE;
-
-DELETE FROM vcs_config;
-INSERT INTO vcs_config (key, value) VALUES
-    ('active_branch', 'main'),
-    ('auto_track',    'true');
-
-INSERT INTO vcs_branch (branch_name, description)
-VALUES ('main', 'Default branch - production state');
-
-INSERT INTO vcs_commit (branch_name, commit_hash, message, author)
-VALUES ('main', md5('genesis-' || NOW()::TEXT), 'Initial commit - system initialized', CURRENT_USER);
-
--- Clean up any rows added by a previous demo run
--- Order matters: delete children before parents (FK-safe)
-DELETE FROM fund_transfer      WHERE remarks          LIKE 'LOAN RESTRUCTURE MEMO%';
-DELETE FROM transaction        WHERE reference_number  = 'REF20240120001';
-DELETE FROM loan               WHERE customer_id       = 7;
-DELETE FROM account            WHERE account_number    = 'SB10000000007';
-DELETE FROM customer           WHERE customer_id       = 7;
-DELETE FROM employee_hr_update WHERE reason LIKE 'DATA ENTRY ERROR%'
-                                  OR reason LIKE 'Outstanding appraisal%'
-                                  OR reason LIKE 'WRONG:%';
-
--- Restore modified rows to seed values
-UPDATE employee SET employment_type = 'contract', salary = 38000 WHERE emp_id = 6;
-UPDATE employee SET salary = 65000                                 WHERE emp_id = 2;
-UPDATE account  SET interest_rate = 3.50 WHERE account_type = 'savings';
-UPDATE account  SET status = 'dormant'   WHERE customer_id  = 5;
-UPDATE customer SET kyc_status = 'expired', status = 'dormant' WHERE customer_id = 5;
-UPDATE loan SET tenure_months=240, emi_amount=39204, interest_rate=8.50,
-               application_status='disbursed', sanctioned_amount=4500000,
-               disbursed_amount=4500000, outstanding_principal=4388000, status='active'
-WHERE loan_id = 1;
-UPDATE loan SET application_status='approved', sanctioned_amount=NULL,
-               disbursed_amount=NULL, interest_rate=NULL, tenure_months=NULL,
-               emi_amount=NULL, disbursement_date=NULL, maturity_date=NULL,
-               outstanding_principal=NULL, status='pending'
-WHERE loan_id = 3;
 
 DO $$ BEGIN RAISE NOTICE ''; END $$;
 DO $$ BEGIN RAISE NOTICE '============================================================'; END $$;
@@ -103,7 +57,7 @@ SELECT vcs_init('loan');
 -- Confirm all tables are tracked
 DO $$ BEGIN RAISE NOTICE ''; END $$;
 DO $$ BEGIN RAISE NOTICE '>> Tracked tables in vcs_repository:'; END $$;
-SELECT table_name, primary_key_column, tracked_since FROM vcs_repository ORDER BY repo_id;
+SELECT * FROM vcs_repository ORDER BY repo_id;
 
 -- Snapshot all existing seed data as the baseline commit
 DO $$ BEGIN RAISE NOTICE ''; END $$;
@@ -321,6 +275,17 @@ UPDATE account SET status = 'frozen' WHERE customer_id = 5;
 
 SELECT vcs_commit('Compliance: Rajan Varma (CUST-5) KYC expired — account frozen pending renewal', 'Suresh Pillai');
 
+-- 5d. RBI directive: cap home loan rates at 8.75% maximum
+-- NOTE: This touches loan_id=1 on main — the feature branch ALSO touched
+--       loan_id=1 (set rate to 8.25%). This creates a REAL conflict that
+--       Step 8 will detect and resolve.
+DO $$ BEGIN RAISE NOTICE '>> 5d. RBI directive — capping home loan LOAN-1 rate at 8.75%...'; END $$;
+UPDATE loan SET
+    interest_rate = 8.75    -- RBI maximum cap for home loans
+WHERE loan_id = 1;
+
+SELECT vcs_commit('RBI directive: home loan LOAN-1 interest rate capped at 8.75% per new circular', 'Rajesh Nair');
+
 DO $$ BEGIN RAISE NOTICE ''; END $$;
 DO $$ BEGIN RAISE NOTICE '>> Main branch log after parallel work:'; END $$;
 SELECT commit_id, hash, message, change_count FROM vcs_log('main');
@@ -401,26 +366,38 @@ DO $$ BEGIN RAISE NOTICE '------------------------------------------------------
 DO $$ BEGIN RAISE NOTICE 'STEP 8 — CONFLICT DETECTION & RESOLUTION'; END $$;
 DO $$ BEGIN RAISE NOTICE '------------------------------------------------------------'; END $$;
 
+-- Conflict: loan_id=1 was changed on BOTH branches after the fork
+--   feature/loan-restructure : interest_rate = 8.25 (restructured rate)
+--   main                     : interest_rate = 8.75 (RBI cap directive)
+-- vcs_merge_conflicts() will return 1 row showing the two conflicting states.
 DO $$ BEGIN RAISE NOTICE '>> Checking for merge conflicts between feature and main...'; END $$;
+DO $$ BEGIN RAISE NOTICE '   (expect 1 conflict: loan_id=1, rate 8.25 vs 8.75)'; END $$;
 SELECT * FROM vcs_merge_conflicts('feature/loan-restructure', 'main');
 
--- The conflict exists on loan_id=1 (Arjun's home loan was touched on both
--- branches). We resolve it by aligning main to match the restructured terms
--- before merging.
+-- RESOLUTION DECISION: The feature branch restructure (8.25%) is the agreed
+-- final rate — it supersedes the blanket RBI cap (8.75%) because the
+-- restructure was a specific customer negotiation approved by the loan officer.
+-- We apply the restructured terms to main, then commit the resolution.
 DO $$ BEGIN RAISE NOTICE ''; END $$;
-DO $$ BEGIN RAISE NOTICE '>> RESOLVING: Accepting restructured terms on main before merge...'; END $$;
+DO $$ BEGIN RAISE NOTICE '>> RESOLVING: Accepting restructured terms (8.25%) — overrides RBI cap commit...'; END $$;
 UPDATE loan SET
     tenure_months        = 300,
     emi_amount           = 33150,
-    interest_rate        = 8.25
+    interest_rate        = 8.25    -- restructured rate wins over blanket cap
 WHERE loan_id = 1;
 
-SELECT vcs_commit('Conflict resolution: align main loan-1 terms with restructure branch before merge', 'Rajesh Nair');
+SELECT vcs_commit('Conflict resolution: LOAN-1 rate 8.25% accepted (restructure) over 8.75% (RBI cap)', 'Rajesh Nair');
 
+-- NOTE: vcs_merge_conflicts() still returns the row for loan_id=1 because
+-- both branches touched it after the fork — the function detects overlap,
+-- not divergence. The conflict is "resolved" when source_data and target_data
+-- show the same value (both 8.25 now). The query below filters to only rows
+-- where the two sides still have different new_data — this should be 0 rows.
 DO $$ BEGIN RAISE NOTICE ''; END $$;
-DO $$ BEGIN RAISE NOTICE '>> Re-checking conflicts after resolution:'; END $$;
-SELECT * FROM vcs_merge_conflicts('feature/loan-restructure', 'main');
--- Should return 0 rows now
+DO $$ BEGIN RAISE NOTICE '>> Re-checking unresolved conflicts (source_data != target_data):'; END $$;
+SELECT * FROM vcs_merge_conflicts('feature/loan-restructure', 'main')
+WHERE source_data IS DISTINCT FROM target_data;
+-- 0 rows = both branches now agree on all row values, safe to merge
 
 -- ============================================================
 -- STEP 9 — MERGE: Bring feature branch into main

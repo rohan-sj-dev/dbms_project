@@ -9,6 +9,12 @@
 --   psql -U postgres -d bank_versioning -f db/00_install_all.sql
 -- ============================================================
 
+-- Stop on first error so problems are visible rather than silently skipped
+\set ON_ERROR_STOP on
+
+-- Ensure UTF-8 encoding so emoji/special chars in function strings are handled
+\encoding UTF8
+
 \echo ''
 \echo '=========================================='
 \echo 'STEP 1/9: Creating banking database schema'

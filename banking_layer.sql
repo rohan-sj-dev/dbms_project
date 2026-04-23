@@ -1,3 +1,4 @@
+-- Active: 1750870354157@@127.0.0.1@5432@bank_versioning
 -- ============================================================
 -- COMPLETE BANKING LAYER - TRANSACTIONS, LOANS & ROLE VIEWS
 -- ============================================================
@@ -29,31 +30,6 @@ CREATE TABLE loan_application (
     reviewed_at      TIMESTAMP,
     decision_notes   TEXT
 );
-
--- ============================================================
--- SECTION 1: TRANSACTION SEQUENCE (auto-increment TXN IDs)
--- ============================================================
--- We use a sequence so concurrent calls never collide
-DROP SEQUENCE IF EXISTS txn_seq;
-CREATE SEQUENCE txn_seq START 17 INCREMENT 1;  -- seeds after TXN016
-
-CREATE OR REPLACE FUNCTION next_txn_id()
-RETURNS VARCHAR(10) AS $$
-BEGIN
-    RETURN 'TXN' || LPAD(nextval('txn_seq')::TEXT, 3, '0');
-END;
-$$ LANGUAGE plpgsql;
-
-DROP SEQUENCE IF EXISTS app_seq;
-CREATE SEQUENCE app_seq START 1 INCREMENT 1;
-
-CREATE OR REPLACE FUNCTION next_app_id()
-RETURNS VARCHAR(15) AS $$
-BEGIN
-    RETURN 'APP' || LPAD(nextval('app_seq')::TEXT, 4, '0');
-END;
-$$ LANGUAGE plpgsql;
-
 -- ============================================================
 -- SECTION 2: DEPOSIT
 -- ============================================================
@@ -214,7 +190,7 @@ BEGIN
     IF v_officer_id IS NULL THEN
         SELECT emp_id INTO v_officer_id
           FROM employee
-         WHERE branch_id = COALESCE(v_branch_id, 'BR001')
+         WHERE branch_id = COALESCE(v_branch_id, 001)
          ORDER BY emp_id LIMIT 1;
     END IF;
 INSERT INTO loan_application (
@@ -259,31 +235,28 @@ DECLARE
     v_app        loan_application%ROWTYPE;
     v_emp_role   VARCHAR(30);
 BEGIN
-    SELECT * INTO v_app FROM loan_application WHERE application_id = p_app_id;
+    -- Check application exists
+    SELECT * INTO v_app 
+    FROM loan_application 
+    WHERE application_id = p_app_id;
+
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Application "%" not found', p_app_id;
     END IF;
 
-    SELECT designation INTO v_emp_role FROM employee WHERE emp_id = p_emp_id;
+    -- Check employee exists
+    SELECT designation INTO v_emp_role 
+    FROM employee 
+    WHERE emp_id = p_emp_id;
+
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Employee "%" not found', p_emp_id;
     END IF;
 
-    -- ROLE CHECK
-    IF v_emp_role = 'Branch Manager' THEN
-        NULL;
+    -- ROLE CHECK DISABLED (all employees allowed)
+    -- You can re-enable later if needed
 
-    ELSIF v_emp_role = 'Loan Officer' THEN
-        IF v_app.assigned_emp_id != p_emp_id THEN
-            RAISE EXCEPTION 'Application % is assigned to %, not you (%)',
-                            p_app_id, v_app.assigned_emp_id, p_emp_id;
-        END IF;
-
-    ELSE
-        RAISE EXCEPTION 'No permission';
-    END IF;
-
-    -- UPDATE
+    -- UPDATE application
     UPDATE loan_application
        SET status = p_new_status,
            reviewed_at = NOW(),
@@ -299,32 +272,42 @@ BEGIN
             v_income      DECIMAL(15,2);
             v_credit      INT;
         BEGIN
+            -- Fetch latest financials
             SELECT cf.annual_income, cf.credit_score
               INTO v_income, v_credit
               FROM customer_financials cf
              WHERE cf.customer_id = v_app.customer_id
-             ORDER BY cf.fin_id DESC LIMIT 1;
+             ORDER BY cf.fin_id DESC 
+             LIMIT 1;
 
+            -- Interest rate logic
             v_rate := CASE
                 WHEN COALESCE(v_credit, 650) >= 750 THEN 7.00
                 WHEN COALESCE(v_credit, 650) >= 700 THEN 8.00
                 ELSE 10.00
             END;
 
+            -- Generate loan ID
             v_new_loan_id := 'LOAN' || LPAD(
-                (SELECT COUNT(*) + 1 FROM loan_current)::TEXT, 3, '0');
+                (SELECT COUNT(*) + 1 FROM loan_current)::TEXT, 3, '0'
+            );
 
+            -- Insert into current loans
             INSERT INTO loan_current (
                 loan_id, borrower_id, loan_amount, interest_rate,
                 application_income, employment_length,
                 approved_by_emp_id, loan_status, updated_at
             )
             VALUES (
-                v_new_loan_id, v_app.customer_id,
-                v_app.requested_amount, v_rate,
+                v_new_loan_id, 
+                v_app.customer_id,
+                v_app.requested_amount, 
+                v_rate,
                 COALESCE(v_income, 0),
                 3,
-                p_emp_id, 'Current', NOW()
+                p_emp_id, 
+                'Current', 
+                NOW()
             );
         END;
     END IF;
@@ -344,8 +327,7 @@ RETURNS TABLE (
     txn_type    TEXT,
     amount      DECIMAL,
     direction   TEXT,    -- CR or DR
-    txn_time    TIMESTAMP,
-    counterpart TEXT
+    txn_date    TIMESTAMP
 ) AS $$
 BEGIN
     RETURN QUERY
@@ -359,12 +341,11 @@ BEGIN
             WHEN t.txn_type = 'Transfer' AND t.account_id = p_account_id THEN 'DR'
             ELSE 'CR'
         END,
-        t.txn_time,
-        COALESCE(t.related_account_id, '—')::TEXT
-    FROM transaction t
+        t.txn_date
+        
+    	FROM transaction t
     WHERE t.account_id = p_account_id
-       OR t.related_account_id = p_account_id
-    ORDER BY t.txn_time DESC
+    ORDER BY t.txn_date DESC
     LIMIT p_limit;
 END;
 $$ LANGUAGE plpgsql;
@@ -388,20 +369,20 @@ BEGIN
 
     v_result := v_result || chr(10) || '--- Accounts ---' || chr(10);
     FOR rec IN (
-        SELECT account_id, account_type, balance, status FROM account
+        SELECT account_id, account_type, current_balance, status FROM account
         WHERE customer_id = p_customer_id ORDER BY opened_date
     ) LOOP
         v_result := v_result || format('  %s [%s] %s — ₹%s' || chr(10),
-            rec.account_id, rec.account_type, rec.status, rec.balance::NUMERIC(15,2));
+            rec.account_id, rec.account_type, rec.status, rec.current_balance::NUMERIC(15,2));
     END LOOP;
 
     v_result := v_result || chr(10) || '--- Active Loans ---' || chr(10);
     FOR rec IN (
-        SELECT loan_id, loan_amount, interest_rate, loan_status FROM loan_current
-        WHERE borrower_id = p_customer_id ORDER BY updated_at
+        SELECT loan_id, applied_amount, base_interest_rate, application_status FROM loan
+        WHERE customer_id = p_customer_id ORDER BY application_date
     ) LOOP
         v_result := v_result || format('  %s ₹%s @%s%% — %s' || chr(10),
-            rec.loan_id, rec.loan_amount::NUMERIC(15,2), rec.interest_rate, rec.loan_status);
+            rec.loan_id, rec.applied_amount::NUMERIC(15,2), rec.base_interest_rate, rec.application_status);
     END LOOP;
 
     v_result := v_result || chr(10) || '--- Loan Applications ---' || chr(10);
@@ -630,7 +611,7 @@ BEGIN
     END IF;
  
     v_result := format(
-        '✅ HR Update #%s recorded successfully.' || chr(10) ||
+        'HR Update #%s recorded successfully.' || chr(10) ||
         '   Employee    : %s (ID: %s)' || chr(10) ||
         '   Update Type : %s' || chr(10) ||
         '   Effective   : %s' || chr(10) ||

@@ -16,19 +16,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ── Helpers ──
 async function query(text, params) {
   const res = await pool.query(text, params);
   return res.rows;
 }
-/** Coerce empty-string / undefined to null, else parse as int. Returns null or integer. */
 function intOrNull(v) {
   if (v === '' || v === undefined || v === null) return null;
   const n = parseInt(v, 10);
   return Number.isNaN(n) ? null : n;
 }
 
-/** Map Postgres errors to human-friendly messages. */
 function friendlyPgError(e) {
   const msg = e?.message || 'Operation failed';
   if (e?.code === '23505') return `Duplicate value — ${e.detail || msg}`;
@@ -39,9 +36,6 @@ function friendlyPgError(e) {
   return msg;
 }
 
-// ════════════════════════════════════════════════════════════
-//  BANKING ENDPOINTS
-// ════════════════════════════════════════════════════════════
 
 app.get('/api/branches', async (_req, res) => {
   try {
@@ -184,9 +178,8 @@ app.get('/api/branch-summary', async (_req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ════════════════════════════════════════════════════════════
+
 //  VIEW-BASED ENDPOINTS (from views.sql)
-// ════════════════════════════════════════════════════════════
 
 app.get('/api/manager-dashboard', async (_req, res) => {
   try {
@@ -228,9 +221,8 @@ app.get('/api/account-ledger', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ════════════════════════════════════════════════════════════
+
 //  BANKING FUNCTIONS (from banking_layer.sql)
-// ════════════════════════════════════════════════════════════
 
 app.post('/api/banking/deposit', async (req, res) => {
   try {
@@ -325,7 +317,7 @@ app.get('/api/banking/customer-summary/:customerId', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Loan Applications CRUD ──
+//Loan Applications CRUD
 app.get('/api/loan-applications', async (_req, res) => {
   try {
     const rows = await query(`
@@ -394,11 +386,11 @@ app.put('/api/loan-applications/:id', async (req, res) => {
   } catch (e) { res.status(400).json({ error: friendlyPgError(e) }); }
 });
 
-// ════════════════════════════════════════════════════════════
-//  VCS ENDPOINTS
-// ════════════════════════════════════════════════════════════
 
-// ── Config ──
+//  VCS ENDPOINTS
+
+
+// Config 
 app.get('/api/vcs/active-branch', async (_req, res) => {
   try {
     const rows = await query("SELECT vcs_get_active_branch() AS branch");
@@ -406,7 +398,7 @@ app.get('/api/vcs/active-branch', async (_req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Branches ──
+// Branches
 app.get('/api/vcs/branches', async (_req, res) => {
   try {
     const rows = await query('SELECT * FROM vcs_branch_list()');
@@ -604,9 +596,8 @@ app.get('/api/vcs/stats', async (_req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ════════════════════════════════════════════════════════════
 //  AUTH
-// ════════════════════════════════════════════════════════════
+
 
 app.post('/api/auth/login', async (req, res) => {
   try {
@@ -668,9 +659,7 @@ app.post('/api/auth/change-password', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ════════════════════════════════════════════════════════════
 //  BANKING CRUD (Manager)
-// ════════════════════════════════════════════════════════════
 
 // ── Customers CRUD ──
 app.post('/api/customers', async (req, res) => {
@@ -895,9 +884,8 @@ app.post('/api/hr-updates', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ════════════════════════════════════════════════════════════
+
 //  EMPLOYEE-SCOPED ENDPOINTS
-// ════════════════════════════════════════════════════════════
 
 app.get('/api/employee/:empId/profile', async (req, res) => {
   try {
@@ -998,9 +986,7 @@ app.get('/api/employee/:empId/workbench', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ════════════════════════════════════════════════════════════
 //  CUSTOMER-SCOPED ENDPOINTS
-// ════════════════════════════════════════════════════════════
 
 app.get('/api/customer/:custId/profile', async (req, res) => {
   try {
@@ -1091,9 +1077,7 @@ app.get('/api/customer/:custId/loan-applications', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ════════════════════════════════════════════════════════════
 //  ACID DEMO ENDPOINTS
-// ════════════════════════════════════════════════════════════
 
 // Get accounts for ACID demo dropdowns
 app.get('/api/acid/accounts', async (_req, res) => {
